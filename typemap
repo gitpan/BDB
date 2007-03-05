@@ -1,0 +1,76 @@
+DB_ENV *	DB_ENV
+DB_ENV_ornull *	DB_ENV_ornull
+DB_TXN *	DB_TXN
+DB_TXN_ornull *	DB_TXN_ornull
+DB *		DB
+DB_ornull *	DB_ornull
+DBC *		DBC
+DBC_ornull *	DBC_ornull
+DB_SEQUENCE *   DB_SEQUENCE
+DB_SEQUENCE_ornull *   DB_SEQUENCE_ornull
+
+SV8 *		T_SV8
+octetstring	OCTETS
+db_seq_t	DB_SEQ
+
+
+INPUT
+
+T_SV8
+	($var) = $arg;
+        if (SvPOKp ($var) && !sv_utf8_downgrade ($var, 1))
+          croak (\"\\\"%s\\\" argument must be byte/octet-encoded\", \"$var\")
+
+OCTETS
+        $var = SvOK ($arg) ? SvPVbyte_nolen ($arg) : 0;
+
+DB_SEQ
+	$var = sizeof (IV) > 4 ? SvIV ($arg) : SvNV ($arg);
+
+DB_ENV
+        SvPTR ($var, $arg, DB_ENV *, BDB::Env, 0);
+
+DB_TXN
+        SvPTR ($var, $arg, DB_TXN *, BDB::Txn, 0);
+
+DBC
+        SvPTR ($var, $arg, DBC *, BDB::Cursor, 0);
+
+DB
+        SvPTR ($var, $arg, DB *, BDB::Db, 0);
+
+DB_SEQUENCE
+        SvPTR ($var, $arg, DB_SEQUENCE *, BDB::Sequence, 0);
+
+DB_ENV_ornull
+        SvPTR ($var, $arg, DB_ENV *, BDB::Env, 1);
+
+DB_TXN_ornull
+        SvPTR ($var, $arg, DB_TXN *, BDB::Txn, 1);
+
+DBC_ornull
+        SvPTR ($var, $arg, DBC *, BDB::Cursor, 1);
+
+DB_ornull
+        SvPTR ($var, $arg, DB *, BDB::Db, 1);
+
+DB_SEQUENCE_ornull
+        SvPTR ($var, $arg, DB_SEQUENCE *, BDB::Sequence, 1);
+
+
+OUTPUT
+
+DB_ENV
+	sv_setref_pv ($arg, "BDB::Env", (void *)$var);
+
+DB_TXN
+	sv_setref_pv ($arg, "BDB::Txn", (void *)$var);
+
+DBC
+	sv_setref_pv ($arg, "BDB::Cursor", (void *)$var);
+
+DB
+	sv_setref_pv ($arg, "BDB::Db", (void *)$var);
+
+DB_SEQUENCE
+	sv_setref_pv ($arg, "BDB::Sequence", (void *)$var);

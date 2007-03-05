@@ -1,0 +1,11 @@
+README
+MANIFEST
+COPYING
+Changes
+Makefile.PL
+BDB.pm
+BDB.xs
+eg/basic_operations
+t/00_load.t
+typemap
+META.yml                                 Module meta-data (added by MakeMaker)

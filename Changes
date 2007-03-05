@@ -1,0 +1,5 @@
+Revision history for BDB::AIO
+
+0.1  Mon Mar  5 20:44:18 CET 2007
+	- cloned from IO::AIO.
+
