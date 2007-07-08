@@ -1,4 +1,13 @@
-Revision history for BDB::AIO
+Revision history for perl module BDB.
+
+0.5  Sun Jul  8 16:57:03 CEST 2007
+	- port to db 4.4.20 (probably any 4.4 version).
+        - added bdb error constants.
+        - add set_errfile/set_msgfile/set_verbose.
+	- shared code between IO::AIO and BDB.
+        - upgrade to xthread.h from IO::AIO for win32 compatibility.
+        - port to win32 (there is an unexplainable hang in
+          db_sequence_get...).
 
 0.1  Mon Mar  5 20:44:18 CET 2007
 	- cloned from IO::AIO.

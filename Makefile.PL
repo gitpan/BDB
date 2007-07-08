@@ -2,6 +2,20 @@ use ExtUtils::MakeMaker;
 
 use Config;
 
+if ($^O =~ /win32/i or $^O =~ /mswin/) {
+
+   # configuration on windows is hardcoded - as always
+
+   warn "your platform is not standards-compliant, you have to port this module first\n";
+   warn "using some hardcoded config that will not work on your system\n";
+
+   $INC  = "-I/Perl/lib/CORE -I/sdk/include -I/vc98/include -I/gtk/include -I/gtk/include/pango-1.0 -I/gtk/include/glib-2.0 -I/gtk/lib/glib-2.0/include/ -I/gtk/include/freetype2";
+   $LIBS = ["-L/gtk/lib -ldb45 -lpthreadVC2"];
+} else {
+   $INC = "";
+   $LIBS = ['-lpthread -ldb'],
+}
+
 if ($^O =~ /linux/ && $Config{usemymalloc} eq "y") {
    print <<EOF;
 
@@ -30,7 +44,8 @@ my $mm = MM->new({
 	            },
     NAME         => "BDB",
     VERSION_FROM => "BDB.pm",
-    LIBS         => ['-lpthread -ldb'],
+    INC          => $INC,
+    LIBS         => $LIBS,
     PM           => {
     		    'BDB.pm'		=> '$(INST_LIBDIR)/BDB.pm',
                     },

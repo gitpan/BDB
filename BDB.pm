@@ -69,7 +69,7 @@ use strict 'vars';
 use base 'Exporter';
 
 BEGIN {
-   our $VERSION = '0.1';
+   our $VERSION = '0.5';
 
    our @BDB_REQ = qw(
       db_env_open db_env_close db_env_txn_checkpoint db_env_lock_detect
@@ -184,7 +184,11 @@ Strictly equivalent to:
    BDB::poll_wait, BDB::poll_cb
       while BDB::nreqs;
 
+=back
+
 =head3 CONTROLLING THE NUMBER OF THREADS
+
+=over 4
 
 =item BDB::min_parallel $nthreads
 

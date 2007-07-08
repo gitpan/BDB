@@ -5,6 +5,7 @@ Changes
 Makefile.PL
 BDB.pm
 BDB.xs
+xthread.h
 eg/basic_operations
 t/00_load.t
 typemap

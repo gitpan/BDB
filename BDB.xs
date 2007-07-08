@@ -1,12 +1,4 @@
-/* solaris */
-#define _POSIX_PTHREAD_SEMANTICS 1
-
-#if __linux && !defined(_GNU_SOURCE)
-# define _GNU_SOURCE
-#endif
-
-/* just in case */
-#define _REENTRANT 1
+#include "xthread.h"
 
 #include <errno.h>
 
@@ -14,37 +6,35 @@
 #include "perl.h"
 #include "XSUB.h"
 
-#include <pthread.h>
+// perl stupidly defines these as macros, breaking
+// lots and lots of code.
+#undef open
+#undef close
+#undef abort
+#undef malloc
+#undef free
+#undef send
 
 #include <stddef.h>
 #include <stdlib.h>
 #include <errno.h>
-#include <sys/time.h>
 #include <sys/types.h>
 #include <limits.h>
-#include <unistd.h>
 #include <fcntl.h>
+
+#ifndef _WIN32
+# include <sys/time.h>
+# include <unistd.h>
+#endif
 
 #include <db.h>
 
-#if DB_VERSION_MAJOR < 4 || (DB_VERSION_MAJOR == 4 && DB_VERSION_MINOR < 5)
-# error you need Berkeley DB 4.5 or newer installed
+#if DB_VERSION_MAJOR < 4 || (DB_VERSION_MAJOR == 4 && DB_VERSION_MINOR < 4)
+# error you need Berkeley DB 4.4 or newer installed
 #endif
 
 /* number of seconds after which idle threads exit */
 #define IDLE_TIMEOUT 10
-
-/* wether word reads are potentially non-atomic.
- * this is conservatice, likely most arches this runs
- * on have atomic word read/writes.
- */
-#ifndef WORDACCESS_UNSAFE
-# if __i386 || __x86_64
-#  define WORDACCESS_UNSAFE 0
-# else
-#  define WORDACCESS_UNSAFE 1
-# endif
-#endif
 
 typedef DB_ENV      DB_ENV_ornull;
 typedef DB_TXN      DB_TXN_ornull;
@@ -57,13 +47,25 @@ typedef char *octetstring;
 
 static SV *prepare_cb;
 
-static inline char *
+static void
+debug_errcall (const DB_ENV *dbenv, const char *errpfx, const char *msg)
+{
+  printf ("err[%s]\n", msg);
+}
+
+static void
+debug_msgcall (const DB_ENV *dbenv, const char *msg)
+{
+  printf ("msg[%s]\n", msg);
+}
+
+static char *
 strdup_ornull (const char *s)
 {
   return s ? strdup (s) : 0;
 }
 
-static inline void
+static void
 sv_to_dbt (DBT *dbt, SV *sv)
 {
   STRLEN len;
@@ -75,7 +77,7 @@ sv_to_dbt (DBT *dbt, SV *sv)
   dbt->flags = DB_DBT_REALLOC;
 }
 	
-static inline void
+static void
 dbt_to_sv (SV *sv, DBT *dbt)
 {
   if (sv)
@@ -149,23 +151,14 @@ static int next_pri = DEFAULT_PRI + PRI_BIAS;
 
 static unsigned int started, idle, wanted;
 
-#if __linux && defined (PTHREAD_ADAPTIVE_MUTEX_INITIALIZER_NP)
-# define AIO_MUTEX_INIT PTHREAD_ADAPTIVE_MUTEX_INITIALIZER_NP
-#else
-# define AIO_MUTEX_INIT PTHREAD_MUTEX_INITIALIZER
-#endif
-
-#define LOCK(mutex)   pthread_mutex_lock   (&(mutex))
-#define UNLOCK(mutex) pthread_mutex_unlock (&(mutex))
-
 /* worker threads management */
-static pthread_mutex_t wrklock = AIO_MUTEX_INIT;
+static mutex_t wrklock = X_MUTEX_INIT;
 
 typedef struct worker {
   /* locked by wrklock */
   struct worker *prev, *next;
 
-  pthread_t tid;
+  thread_t tid;
 
   /* locked by reslock, reqlock or wrklock */
   aio_req req; /* currently processed request */
@@ -190,11 +183,11 @@ static void worker_free (worker *wrk)
 static volatile unsigned int nreqs, nready, npending;
 static volatile unsigned int max_idle = 4;
 static volatile unsigned int max_outstanding = 0xffffffff;
-static int respipe [2];
+static int respipe [2], respipe_osf [2];
 
-static pthread_mutex_t reslock = AIO_MUTEX_INIT;
-static pthread_mutex_t reqlock = AIO_MUTEX_INIT;
-static pthread_cond_t  reqwait = PTHREAD_COND_INITIALIZER;
+static mutex_t reslock = X_MUTEX_INIT;
+static mutex_t reqlock = X_MUTEX_INIT;
+static cond_t  reqwait = X_COND_INIT;
 
 #if WORDACCESS_UNSAFE
 
@@ -202,9 +195,9 @@ static unsigned int get_nready ()
 {
   unsigned int retval;
 
-  LOCK   (reqlock);
+  X_LOCK   (reqlock);
   retval = nready;
-  UNLOCK (reqlock);
+  X_UNLOCK (reqlock);
 
   return retval;
 }
@@ -213,9 +206,9 @@ static unsigned int get_npending ()
 {
   unsigned int retval;
 
-  LOCK   (reslock);
+  X_LOCK   (reslock);
   retval = npending;
-  UNLOCK (reslock);
+  X_UNLOCK (reslock);
 
   return retval;
 }
@@ -224,9 +217,9 @@ static unsigned int get_nthreads ()
 {
   unsigned int retval;
 
-  LOCK   (wrklock);
+  X_LOCK   (wrklock);
   retval = started;
-  UNLOCK (wrklock);
+  X_UNLOCK (wrklock);
 
   return retval;
 }
@@ -371,30 +364,42 @@ static void req_free (aio_req req)
   Safefree (req);
 }
 
-static void *aio_proc (void *arg);
+#ifdef USE_SOCKETS_AS_HANDLES
+# define TO_SOCKET(x) (win32_get_osfhandle (x))
+#else
+# define TO_SOCKET(x) (x)
+#endif
+
+static void
+create_pipe (int fd[2])
+{
+#ifdef _WIN32
+  int arg = 1;
+  if (PerlSock_socketpair (AF_UNIX, SOCK_STREAM, 0, fd)
+      || ioctlsocket (TO_SOCKET (fd [0]), FIONBIO, &arg)
+      || ioctlsocket (TO_SOCKET (fd [1]), FIONBIO, &arg))
+#else
+  if (pipe (fd)
+      || fcntl (fd [0], F_SETFL, O_NONBLOCK)
+      || fcntl (fd [1], F_SETFL, O_NONBLOCK))
+#endif
+    croak ("unable to initialize result pipe");
+
+  respipe_osf [0] = TO_SOCKET (respipe [0]);
+  respipe_osf [1] = TO_SOCKET (respipe [1]);
+}
+
+X_THREAD_PROC (bdb_proc);
 
 static void start_thread (void)
 {
-  sigset_t fullsigset, oldsigset;
-  pthread_attr_t attr;
-
   worker *wrk = calloc (1, sizeof (worker));
 
   if (!wrk)
     croak ("unable to allocate worker thread data");
 
-  pthread_attr_init (&attr);
-  pthread_attr_setdetachstate (&attr, PTHREAD_CREATE_DETACHED);
-#ifdef PTHREAD_SCOPE_PROCESS
-  pthread_attr_setscope (&attr, PTHREAD_SCOPE_PROCESS);
-#endif
-
-  sigfillset (&fullsigset);
-
-  LOCK (wrklock);
-  pthread_sigmask (SIG_SETMASK, &fullsigset, &oldsigset);
-
-  if (pthread_create (&wrk->tid, &attr, aio_proc, (void *)wrk) == 0)
+  X_LOCK (wrklock);
+  if (thread_create (&wrk->tid, bdb_proc, (void *)wrk))
     {
       wrk->prev = &wrk_first;
       wrk->next = wrk_first.next;
@@ -405,8 +410,7 @@ static void start_thread (void)
   else
     free (wrk);
 
-  pthread_sigmask (SIG_SETMASK, &oldsigset, 0);
-  UNLOCK (wrklock);
+  X_UNLOCK (wrklock);
 }
 
 static void maybe_start_thread ()
@@ -428,10 +432,12 @@ static void req_send (aio_req req)
   // synthesize callback if none given
   if (!SvOK (req->callback))
     {
+      int count;
+
       dSP;
       PUSHMARK (SP);
       PUTBACK;
-      int count = call_sv (prepare_cb, G_ARRAY);
+      count = call_sv (prepare_cb, G_ARRAY);
       SPAGAIN;
 
       if (count != 2)
@@ -444,11 +450,11 @@ static void req_send (aio_req req)
 
   ++nreqs;
 
-  LOCK (reqlock);
+  X_LOCK (reqlock);
   ++nready;
   reqq_push (&req_queue, req);
-  pthread_cond_signal (&reqwait);
-  UNLOCK (reqlock);
+  X_COND_SIGNAL (reqwait);
+  X_UNLOCK (reqlock);
 
   maybe_start_thread ();
 
@@ -471,21 +477,21 @@ static void end_thread (void)
   req->type = REQ_QUIT;
   req->pri  = PRI_MAX + PRI_BIAS;
 
-  LOCK (reqlock);
+  X_LOCK (reqlock);
   reqq_push (&req_queue, req);
-  pthread_cond_signal (&reqwait);
-  UNLOCK (reqlock);
+  X_COND_SIGNAL (reqwait);
+  X_UNLOCK (reqlock);
 
-  LOCK (wrklock);
+  X_LOCK (wrklock);
   --started;
-  UNLOCK (wrklock);
+  X_UNLOCK (wrklock);
 }
 
 static void set_max_idle (int nthreads)
 {
-  if (WORDACCESS_UNSAFE) LOCK   (reqlock);
+  if (WORDACCESS_UNSAFE) X_LOCK   (reqlock);
   max_idle = nthreads <= 0 ? 1 : nthreads;
-  if (WORDACCESS_UNSAFE) UNLOCK (reqlock);
+  if (WORDACCESS_UNSAFE) X_UNLOCK (reqlock);
 }
 
 static void min_parallel (int nthreads)
@@ -510,19 +516,19 @@ static void poll_wait ()
   while (nreqs)
     {
       int size;
-      if (WORDACCESS_UNSAFE) LOCK   (reslock);
+      if (WORDACCESS_UNSAFE) X_LOCK   (reslock);
       size = res_queue.size;
-      if (WORDACCESS_UNSAFE) UNLOCK (reslock);
+      if (WORDACCESS_UNSAFE) X_UNLOCK (reslock);
 
       if (size)
         return;
 
       maybe_start_thread ();
 
-      FD_ZERO(&rfd);
-      FD_SET(respipe [0], &rfd);
+      FD_ZERO (&rfd);
+      FD_SET (respipe [0], &rfd);
 
-      select (respipe [0] + 1, &rfd, 0, 0, 0);
+      PerlSock_select (respipe [0] + 1, &rfd, 0, 0, 0);
     }
 }
 
@@ -544,7 +550,7 @@ static int poll_cb ()
         {
           maybe_start_thread ();
 
-          LOCK (reslock);
+          X_LOCK (reslock);
           req = reqq_shift (&res_queue);
 
           if (req)
@@ -555,12 +561,12 @@ static int poll_cb ()
                 {
                   /* read any signals sent by the worker threads */
                   char buf [4];
-                  while (read (respipe [0], buf, 4) == 4)
+                  while (respipe_read (respipe [0], buf, 4) == 4)
                     ;
                 }
             }
 
-          UNLOCK (reslock);
+          X_UNLOCK (reslock);
 
           if (!req)
             break;
@@ -600,35 +606,22 @@ static int poll_cb ()
   return count;
 }
 
-static void create_pipe ()
-{
-  if (pipe (respipe))
-    croak ("unable to initialize result pipe");
-
-  if (fcntl (respipe [0], F_SETFL, O_NONBLOCK))
-    croak ("cannot set result pipe to nonblocking mode");
-
-  if (fcntl (respipe [1], F_SETFL, O_NONBLOCK))
-    croak ("cannot set result pipe to nonblocking mode");
-}
-
 /*****************************************************************************/
 
-static void *aio_proc (void *thr_arg)
+X_THREAD_PROC (bdb_proc)
 {
   aio_req req;
   struct timespec ts;
   worker *self = (worker *)thr_arg;
 
   /* try to distribute timeouts somewhat evenly */
-  ts.tv_nsec = (((unsigned long)self + (unsigned long)ts.tv_sec) & 1023UL)
-               * (1000000000UL / 1024UL);
+  ts.tv_nsec = ((unsigned long)self & 1023UL) * (1000000000UL / 1024UL);
 
   for (;;)
     {
       ts.tv_sec  = time (0) + IDLE_TIMEOUT;
 
-      LOCK (reqlock);
+      X_LOCK (reqlock);
 
       for (;;)
         {
@@ -639,21 +632,21 @@ static void *aio_proc (void *thr_arg)
 
           ++idle;
 
-          if (pthread_cond_timedwait (&reqwait, &reqlock, &ts)
+          if (X_COND_TIMEDWAIT (reqwait, reqlock, ts)
               == ETIMEDOUT)
             {
               if (idle > max_idle)
                 {
                   --idle;
-                  UNLOCK (reqlock);
-                  LOCK (wrklock);
+                  X_UNLOCK (reqlock);
+                  X_LOCK (wrklock);
                   --started;
-                  UNLOCK (wrklock);
+                  X_UNLOCK (wrklock);
                   goto quit;
                 }
 
               /* we are allowed to idle, so do so without any timeout */
-              pthread_cond_wait (&reqwait, &reqlock);
+              X_COND_WAIT (reqwait, reqlock);
               ts.tv_sec  = time (0) + IDLE_TIMEOUT;
             }
 
@@ -662,7 +655,7 @@ static void *aio_proc (void *thr_arg)
 
       --nready;
 
-      UNLOCK (reqlock);
+      X_UNLOCK (reqlock);
      
       switch (req->type)
         {
@@ -786,24 +779,24 @@ static void *aio_proc (void *thr_arg)
             break;
         }
 
-      LOCK (reslock);
+      X_LOCK (reslock);
 
       ++npending;
 
       if (!reqq_push (&res_queue, req))
         /* write a dummy byte to the pipe so fh becomes ready */
-        write (respipe [1], &respipe, 1);
+        respipe_write (respipe_osf [1], (const void *)&respipe_osf, 1);
 
       self->req = 0;
       worker_clear (self);
 
-      UNLOCK (reslock);
+      X_UNLOCK (reslock);
     }
 
 quit:
-  LOCK (wrklock);
+  X_LOCK (wrklock);
   worker_free (self);
-  UNLOCK (wrklock);
+  X_UNLOCK (wrklock);
 
   return 0;
 }
@@ -812,16 +805,16 @@ quit:
 
 static void atfork_prepare (void)
 {
-  LOCK (wrklock);
-  LOCK (reqlock);
-  LOCK (reslock);
+  X_LOCK (wrklock);
+  X_LOCK (reqlock);
+  X_LOCK (reslock);
 }
 
 static void atfork_parent (void)
 {
-  UNLOCK (reslock);
-  UNLOCK (reqlock);
-  UNLOCK (wrklock);
+  X_UNLOCK (reslock);
+  X_UNLOCK (reqlock);
+  X_UNLOCK (wrklock);
 }
 
 static void atfork_child (void)
@@ -851,9 +844,10 @@ static void atfork_child (void)
   nready   = 0;
   npending = 0;
 
-  close (respipe [0]);
-  close (respipe [1]);
-  create_pipe ();
+  respipe_close (respipe [0]);
+  respipe_close (respipe [1]);
+
+  create_pipe (respipe);
 
   atfork_parent ();
 }
@@ -942,7 +936,6 @@ BOOT:
           const_iv (LOG_AUTOREMOVE)
           const_iv (LOG_INMEMORY)
           const_iv (NOLOCKING)
-          const_iv (MULTIVERSION)
           const_iv (NOMMAP)
           const_iv (NOPANIC)
           const_iv (OVERWRITE)
@@ -950,7 +943,6 @@ BOOT:
           const_iv (REGION_INIT)
           const_iv (TIME_NOTGRANTED)
           const_iv (TXN_NOSYNC)
-          const_iv (TXN_SNAPSHOT)
           const_iv (TXN_WRITE_NOSYNC)
           const_iv (WRITECURSOR)
           const_iv (YIELDCPU)
@@ -1003,7 +995,6 @@ BOOT:
           const_iv (NOOVERWRITE)
 
           const_iv (TXN_NOWAIT)
-          const_iv (TXN_SNAPSHOT)
           const_iv (TXN_SYNC)
 
           const_iv (SET_LOCK_TIMEOUT)
@@ -1041,13 +1032,67 @@ BOOT:
           const_iv (SEQ_DEC)
           const_iv (SEQ_INC)
           const_iv (SEQ_WRAP)
+
+          const_iv (BUFFER_SMALL)
+          const_iv (DONOTINDEX)
+          const_iv (KEYEMPTY	)
+          const_iv (KEYEXIST	)
+          const_iv (LOCK_DEADLOCK)
+          const_iv (LOCK_NOTGRANTED)
+          const_iv (LOG_BUFFER_FULL)
+          const_iv (NOSERVER)
+          const_iv (NOSERVER_HOME)
+          const_iv (NOSERVER_ID)
+          const_iv (NOTFOUND)
+          const_iv (OLD_VERSION)
+          const_iv (PAGE_NOTFOUND)
+          const_iv (REP_DUPMASTER)
+          const_iv (REP_HANDLE_DEAD)
+          const_iv (REP_HOLDELECTION)
+          const_iv (REP_IGNORE)
+          const_iv (REP_ISPERM)
+          const_iv (REP_JOIN_FAILURE)
+          const_iv (REP_LOCKOUT)
+          const_iv (REP_NEWMASTER)
+          const_iv (REP_NEWSITE)
+          const_iv (REP_NOTPERM)
+          const_iv (REP_UNAVAIL)
+          const_iv (RUNRECOVERY)
+          const_iv (SECONDARY_BAD)
+          const_iv (VERIFY_BAD)
+          const_iv (VERSION_MISMATCH)
+
+          const_iv (VERB_DEADLOCK)
+          const_iv (VERB_RECOVERY)
+          const_iv (VERB_REGISTER)
+          const_iv (VERB_REPLICATION)
+          const_iv (VERB_WAITSFOR)
+
+          const_iv (VERSION_MAJOR)
+          const_iv (VERSION_MINOR)
+          const_iv (VERSION_PATCH)
+#if DB_VERSION_MINOR >= 5
+          const_iv (MULTIVERSION)
+          const_iv (TXN_SNAPSHOT)
+#endif
         };
 
         for (civ = const_iv + sizeof (const_iv) / sizeof (const_iv [0]); civ-- > const_iv; )
           newCONSTSUB (stash, (char *)civ->name, newSViv (civ->iv));
 
-	create_pipe ();
-        pthread_atfork (atfork_prepare, atfork_parent, atfork_child);
+        newCONSTSUB (stash, "DB_VERSION", newSVnv (DB_VERSION_MAJOR + DB_VERSION_MINOR * .1));
+        newCONSTSUB (stash, "DB_VERSION_STRING", newSVpv (DB_VERSION_STRING, 0));
+
+        create_pipe (respipe);
+
+        X_THREAD_ATFORK (atfork_prepare, atfork_parent, atfork_child);
+#ifdef _WIN32
+        X_MUTEX_CHECK (wrklock);
+        X_MUTEX_CHECK (reslock);
+        X_MUTEX_CHECK (reqlock);
+
+        X_COND_CHECK  (reqwait);
+#endif
 }
 
 void
@@ -1176,9 +1221,9 @@ int
 nthreads ()
 	PROTOTYPE:
 	CODE:
-        if (WORDACCESS_UNSAFE) LOCK   (wrklock);
+        if (WORDACCESS_UNSAFE) X_LOCK   (wrklock);
         RETVAL = started;
-        if (WORDACCESS_UNSAFE) UNLOCK (wrklock);
+        if (WORDACCESS_UNSAFE) X_UNLOCK (wrklock);
 	OUTPUT:
 	RETVAL
 
@@ -1189,6 +1234,13 @@ set_sync_prepare (SV *cb)
         SvREFCNT_dec (prepare_cb);
         prepare_cb = newSVsv (cb);
 
+char *
+strerror (int errorno = errno)
+	PROTOTYPE: ;$
+        CODE:
+        RETVAL = db_strerror (errorno);
+	OUTPUT:
+        RETVAL
 
 DB_ENV *
 db_env_create (U32 env_flags = 0)
@@ -1197,6 +1249,12 @@ db_env_create (U32 env_flags = 0)
         errno = db_env_create (&RETVAL, env_flags);
         if (errno)
           croak ("db_env_create: %s", db_strerror (errno));
+
+        if (0)
+          {
+            RETVAL->set_errcall (RETVAL, debug_errcall);
+            RETVAL->set_msgcall (RETVAL, debug_msgcall);
+          }
 }
 	OUTPUT:
 	RETVAL
@@ -1205,9 +1263,10 @@ void
 db_env_open (DB_ENV *env, octetstring db_home, U32 open_flags, int mode, SV *callback = &PL_sv_undef)
 	CODE:
 {
-  	env->set_thread_count (env, get_nthreads ());
-
         dREQ (REQ_ENV_OPEN);
+
+  	env->set_thread_count (env, wanted + 2);
+
         req->env   = env;
         req->uint1 = open_flags | DB_THREAD;
         req->int1  = mode;
@@ -1606,6 +1665,20 @@ int set_cachesize (DB_ENV *env, U32 gbytes, U32 bytes, int ncache = 0)
 int set_flags (DB_ENV *env, U32 flags, int onoff)
 	CODE:
         RETVAL = env->set_flags (env, flags, onoff);
+	OUTPUT:
+        RETVAL
+
+void set_errfile (DB_ENV *env, FILE *errfile)
+	CODE:
+        env->set_errfile (env, errfile);
+
+void set_msgfile (DB_ENV *env, FILE *msgfile)
+	CODE:
+        env->set_msgfile (env, msgfile);
+
+int set_verbose (DB_ENV *env, U32 which, int onoff = 1)
+	CODE:
+        RETVAL = env->set_verbose (env, which, onoff);
 	OUTPUT:
         RETVAL
 
