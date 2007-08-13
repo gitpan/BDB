@@ -1,5 +1,10 @@
 Revision history for perl module BDB.
 
+1.0  Mon Aug 13 14:02:42 CEST 2007
+	- some updates for db 4.6.
+        - vastly improved documentation, i.e. there is some now.
+        - this module has been tested a lot in the Crossfire TRT server.
+
 0.5  Sun Jul  8 16:57:03 CEST 2007
 	- port to db 4.4.20 (probably any 4.4 version).
         - added bdb error constants.

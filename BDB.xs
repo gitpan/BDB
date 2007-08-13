@@ -47,6 +47,16 @@ typedef char *octetstring;
 
 static SV *prepare_cb;
 
+#if DB_VERSION_MINOR >= 6
+# define c_close close 
+# define c_count count 
+# define c_del   del   
+# define c_dup   dup   
+# define c_get   get   
+# define c_pget  pget  
+# define c_put   put   
+#endif
+
 static void
 debug_errcall (const DB_ENV *dbenv, const char *errpfx, const char *msg)
 {
@@ -1075,6 +1085,17 @@ BOOT:
           const_iv (MULTIVERSION)
           const_iv (TXN_SNAPSHOT)
 #endif
+#if DB_VERSION_MINOR >= 6
+          const_iv (PREV_DUP)
+# if 0
+          const_iv (PRIORITY_UNCHANGED)
+          const_iv (PRIORITY_VERY_LOW)
+          const_iv (PRIORITY_LOW)
+          const_iv (PRIORITY_DEFAULT)
+          const_iv (PRIORITY_HIGH)
+          const_iv (PRIORITY_VERY_HIGH)
+# endif
+#endif
         };
 
         for (civ = const_iv + sizeof (const_iv) / sizeof (const_iv [0]); civ-- > const_iv; )
@@ -1668,11 +1689,11 @@ int set_flags (DB_ENV *env, U32 flags, int onoff)
 	OUTPUT:
         RETVAL
 
-void set_errfile (DB_ENV *env, FILE *errfile)
+void set_errfile (DB_ENV *env, FILE *errfile = 0)
 	CODE:
         env->set_errfile (env, errfile);
 
-void set_msgfile (DB_ENV *env, FILE *msgfile)
+void set_msgfile (DB_ENV *env, FILE *msgfile = 0)
 	CODE:
         env->set_msgfile (env, msgfile);
 
@@ -1775,7 +1796,7 @@ int set_cachesize (DB *db, U32 gbytes, U32 bytes, int ncache = 0)
 	OUTPUT:
         RETVAL
 
-int set_flags (DB *db, U32 flags);
+int set_flags (DB *db, U32 flags)
 	CODE:
         RETVAL = db->set_flags (db, flags);
 	OUTPUT:
@@ -1799,7 +1820,7 @@ int set_bt_minkey (DB *db, U32 minkey)
 	OUTPUT:
         RETVAL
 
-int set_re_delim(DB *db, int delim);
+int set_re_delim (DB *db, int delim)
 	CODE:
         RETVAL = db->set_re_delim (db, delim);
 	OUTPUT:

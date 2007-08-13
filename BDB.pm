@@ -8,11 +8,16 @@ BDB - Asynchronous Berkeley DB access
 
 =head1 DESCRIPTION
 
-See the eg/ directory in the distribution and the berkeleydb C
-documentation. This is inadequate, but the only sources of documentation
-known for this module so far.
+See the BerkeleyDB documentation (L<http://www.oracle.com/technology/documentation/berkeley-db/db/index.html>).
+The BDB API is very similar to the C API (the translation ahs been very faithful).
 
-=head2 EXAMPLE
+See also the example sections in the document below and possibly the eg/
+subdirectory of the BDB distribution. Last not least see the IO::AIO
+documentation, as that module uses almost the same asynchronous request
+model as this module.
+
+I know this is woefully inadequate documentation. Send a patch!
+
 
 =head1 REQUEST ANATOMY AND LIFETIME
 
@@ -69,7 +74,7 @@ use strict 'vars';
 use base 'Exporter';
 
 BEGIN {
-   our $VERSION = '0.5';
+   our $VERSION = '1.0';
 
    our @BDB_REQ = qw(
       db_env_open db_env_close db_env_txn_checkpoint db_env_lock_detect
@@ -91,6 +96,226 @@ BEGIN {
    require XSLoader;
    XSLoader::load ("BDB", $VERSION);
 }
+
+=head2 BERKELEYDB FUNCTIONS
+
+All of these are functions. The create functions simply return a new
+object and never block. All the remaining functions all take an optional
+callback as last argument. If it is missing, then the fucntion will be
+executed synchronously.
+
+BDB functions that cannot block (mostly functions that manipulate
+settings) are method calls on the relevant objects, so the rule of thumb
+is: if its a method, its not blocking, if its a function, it takes a
+callback as last argument.
+
+In the following, C<$int> signifies an integer return value,
+C<octetstring> is a "binary string" (i.e. a perl string with no character
+indices >255), C<U32> is an unsigned 32 bit integer, C<int> is some
+integer, C<NV> is a floating point value.
+
+The C<SV *> types are generic perl scalars (for input and output of data
+values), and the C<SV *callback> is the optional callback function to call
+when the request is completed.
+
+The various C<DB_ENV> etc. arguments are handles return by
+C<db_env_create>, C<db_create>, C<txn_begin> and so on. If they have an
+appended C<_ornull> this means they are optional and you can pass C<undef>
+for them, resulting a NULL pointer on the C level.
+
+=head3 BDB functions
+
+Functions in the BDB namespace, exported by default:
+
+   $env = db_env_create (U32 env_flags = 0)
+
+   db_env_open (DB_ENV *env, octetstring db_home, U32 open_flags, int mode, SV *callback = &PL_sv_undef)
+   db_env_close (DB_ENV *env, U32 flags = 0, SV *callback = &PL_sv_undef)
+   db_env_txn_checkpoint (DB_ENV *env, U32 kbyte = 0, U32 min = 0, U32 flags = 0, SV *callback = &PL_sv_undef)
+   db_env_lock_detect (DB_ENV *env, U32 flags = 0, U32 atype = DB_LOCK_DEFAULT, SV *dummy = 0, SV *callback = &PL_sv_undef)
+   db_env_memp_sync (DB_ENV *env, SV *dummy = 0, SV *callback = &PL_sv_undef)
+   db_env_memp_trickle (DB_ENV *env, int percent, SV *dummy = 0, SV *callback = &PL_sv_undef)
+
+   $db = db_create (DB_ENV *env = 0, U32 flags = 0)
+
+   db_open (DB *db, DB_TXN_ornull *txnid, octetstring file, octetstring database, int type, U32 flags, int mode, SV *callback = &PL_sv_undef)
+   db_close (DB *db, U32 flags = 0, SV *callback = &PL_sv_undef)
+   db_compact (DB *db, DB_TXN_ornull *txn = 0, SV *start = 0, SV *stop = 0, SV *unused1 = 0, U32 flags = DB_FREE_SPACE, SV *unused2 = 0, SV *callback = &PL_sv_unde
+   db_sync (DB *db, U32 flags = 0, SV *callback = &PL_sv_undef)
+   db_key_range (DB *db, DB_TXN_ornull *txn, SV *key, SV *key_range, U32 flags = 0, SV *callback = &PL_sv_undef)
+   db_put (DB *db, DB_TXN_ornull *txn, SV *key, SV *data, U32 flags = 0, SV *callback = &PL_sv_undef)
+   db_get (DB *db, DB_TXN_ornull *txn, SV *key, SV *data, U32 flags = 0, SV *callback = &PL_sv_undef)
+   db_pget (DB *db, DB_TXN_ornull *txn, SV *key, SV *pkey, SV *data, U32 flags = 0, SV *callback = &PL_sv_undef)
+   db_del (DB *db, DB_TXN_ornull *txn, SV *key, U32 flags = 0, SV *callback = &PL_sv_undef)
+   db_txn_commit (DB_TXN *txn, U32 flags = 0, SV *callback = &PL_sv_undef)
+   db_txn_abort (DB_TXN *txn, SV *callback = &PL_sv_undef)
+   db_c_close (DBC *dbc, SV *callback = &PL_sv_undef)
+   db_c_count (DBC *dbc, SV *count, U32 flags = 0, SV *callback = &PL_sv_undef)
+   db_c_put (DBC *dbc, SV *key, SV *data, U32 flags = 0, SV *callback = &PL_sv_undef)
+   db_c_get (DBC *dbc, SV *key, SV *data, U32 flags = 0, SV *callback = &PL_sv_undef)
+   db_c_pget (DBC *dbc, SV *key, SV *pkey, SV *data, U32 flags = 0, SV *callback = &PL_sv_undef)
+   db_c_del (DBC *dbc, U32 flags = 0, SV *callback = &PL_sv_undef)
+
+   db_sequence_open (DB_SEQUENCE *seq, DB_TXN_ornull *txnid, SV *key, U32 flags = 0, SV *callback = &PL_sv_undef)
+   db_sequence_close (DB_SEQUENCE *seq, U32 flags = 0, SV *callback = &PL_sv_undef)
+   db_sequence_get (DB_SEQUENCE *seq, DB_TXN_ornull *txnid, int delta, SV *seq_value, U32 flags = DB_TXN_NOSYNC, SV *callback = &PL_sv_undef)
+   db_sequence_remove (DB_SEQUENCE *seq, DB_TXN_ornull *txnid = 0, U32 flags = 0, SV *callback = &PL_sv_undef)
+
+
+=head3 DB_ENV/database environment methods
+
+Methods available on DB_ENV/$env handles:
+
+   DESTROY (DB_ENV_ornull *env)
+           CODE:
+           if (env)
+             env->close (env, 0);
+
+   $int = $env->set_data_dir (const char *dir)
+   $int = $env->set_tmp_dir (const char *dir)
+   $int = $env->set_lg_dir (const char *dir)
+   $int = $env->set_shm_key (long shm_key)
+   $int = $env->set_cachesize (U32 gbytes, U32 bytes, int ncache = 0)
+   $int = $env->set_flags (U32 flags, int onoff)
+   $env->set_errfile (FILE *errfile = 0)
+   $env->set_msgfile (FILE *msgfile = 0)
+   $int = $env->set_verbose (U32 which, int onoff = 1)
+   $int = $env->set_encrypt (const char *password, U32 flags = 0)
+   $int = $env->set_timeout (NV timeout, U32 flags)
+   $int = $env->set_mp_max_openfd (int maxopenfd);
+   $int = $env->set_mp_max_write (int maxwrite, int maxwrite_sleep);
+   $int = $env->set_mp_mmapsize (int mmapsize_mb)
+   $int = $env->set_lk_detect (U32 detect = DB_LOCK_DEFAULT)
+   $int = $env->set_lk_max_lockers (U32 max)
+   $int = $env->set_lk_max_locks (U32 max)
+   $int = $env->set_lk_max_objects (U32 max)
+   $int = $env->set_lg_bsize (U32 max)
+   $int = $env->set_lg_max (U32 max)
+
+   $txn = $env->txn_begin (DB_TXN_ornull *parent = 0, U32 flags = 0)
+
+=head4 example
+
+   use AnyEvent;
+   use BDB;
+
+   our $FH; open $FH, "<&=" . BDB::poll_fileno;
+   our $WATCHER = AnyEvent->io (fh => $FH, poll => 'r', cb => \&BDB::poll_cb);
+
+   BDB::min_parallel 8;
+
+   my $env = db_env_create;
+
+   mkdir "bdtest", 0700;
+   db_env_open
+      $env,
+      "bdtest",
+      BDB::INIT_LOCK | BDB::INIT_LOG | BDB::INIT_MPOOL | BDB::INIT_TXN | BDB::RECOVER | BDB::USE_ENVIRON | BDB::CREATE,
+      0600;
+
+   $env->set_flags (BDB::AUTO_COMMIT | BDB::TXN_NOSYNC, 1);
+
+
+=head3 DB/database methods
+
+Methods available on DB/$db handles:
+
+   DESTROY (DB_ornull *db)
+           CODE:
+           if (db)
+             {
+               SV *env = (SV *)db->app_private;
+               db->close (db, 0);
+               SvREFCNT_dec (env);
+             }
+
+   $int = $db->set_cachesize (U32 gbytes, U32 bytes, int ncache = 0)
+   $int = $db->set_flags (U32 flags)
+   $int = $db->set_encrypt (const char *password, U32 flags)
+   $int = $db->set_lorder (int lorder)
+   $int = $db->set_bt_minkey (U32 minkey)
+   $int = $db->set_re_delim (int delim)
+   $int = $db->set_re_pad (int re_pad)
+   $int = $db->set_re_source (char *source)
+   $int = $db->set_re_len (U32 re_len)
+   $int = $db->set_h_ffactor (U32 h_ffactor)
+   $int = $db->set_h_nelem (U32 h_nelem)
+   $int = $db->set_q_extentsize (U32 extentsize)
+
+   $dbc = $db->cursor (DB_TXN_ornull *txn = 0, U32 flags = 0)
+   $seq = $db->sequence (U32 flags = 0)
+
+=head4 example
+
+   my $db = db_create $env;
+   db_open $db, undef, "table", undef, BDB::BTREE, BDB::AUTO_COMMIT | BDB::CREATE | BDB::READ_UNCOMMITTED, 0600;
+
+   for (1..1000) {
+      db_put $db, undef, "key $_", "data $_";
+
+      db_key_range $db, undef, "key $_", my $keyrange;
+      my ($lt, $eq, $gt) = @$keyrange;
+   }
+
+   db_del $db, undef, "key $_" for 1..1000;
+
+   db_sync $db;
+
+
+=head3 DB_TXN/transaction methods
+
+Methods available on DB_TXN/$txn handles:
+
+   DESTROY (DB_TXN_ornull *txn)
+           CODE:
+           if (txn)
+             txn->abort (txn);
+
+   $int = $txn->set_timeout (NV timeout, U32 flags)
+
+
+=head3 DBC/cursor methods
+
+Methods available on DBC/$dbc handles:
+
+   DESTROY (DBC_ornull *dbc)
+           CODE:
+           if (dbc)
+             dbc->c_close (dbc);
+
+=head4 example
+
+   my $c = $db->cursor;
+
+   for (;;) {
+      db_c_get $c, my $key, my $data, BDB::NEXT;
+      warn "<$!,$key,$data>";
+      last if $!;
+   }
+
+   db_c_close $c;
+
+=head3 DB_SEQUENCE/sequence methods
+
+Methods available on DB_SEQUENCE/$seq handles:
+
+   DESTROY (DB_SEQUENCE_ornull *seq)
+           CODE:
+           if (seq)
+             seq->close (seq, 0);
+
+   $int = $seq->initial_value (db_seq_t value)
+   $int = $seq->set_cachesize (U32 size)
+   $int = $seq->set_flags (U32 flags)
+   $int = $seq->set_range (db_seq_t min, db_seq_t max)
+
+=head4 example
+
+   my $seq = $db->sequence;
+      
+   db_sequence_open $seq, undef, "seq", BDB::CREATE;
+   db_sequence_get $seq, undef, 1, my $value;
+
 
 =head2 SUPPORT FUNCTIONS
 
