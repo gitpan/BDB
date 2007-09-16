@@ -9,7 +9,7 @@ BDB - Asynchronous Berkeley DB access
 =head1 DESCRIPTION
 
 See the BerkeleyDB documentation (L<http://www.oracle.com/technology/documentation/berkeley-db/db/index.html>).
-The BDB API is very similar to the C API (the translation ahs been very faithful).
+The BDB API is very similar to the C API (the translation has been very faithful).
 
 See also the example sections in the document below and possibly the eg/
 subdirectory of the BDB distribution. Last not least see the IO::AIO
@@ -74,13 +74,13 @@ use strict 'vars';
 use base 'Exporter';
 
 BEGIN {
-   our $VERSION = '1.0';
+   our $VERSION = '1.1';
 
    our @BDB_REQ = qw(
       db_env_open db_env_close db_env_txn_checkpoint db_env_lock_detect
       db_env_memp_sync db_env_memp_trickle
       db_open db_close db_compact db_sync db_put db_get db_pget db_del db_key_range
-      db_txn_commit db_txn_abort
+      db_txn_commit db_txn_abort db_txn_finish
       db_c_close db_c_count db_c_put db_c_get db_c_pget db_c_del
       db_sequence_open db_sequence_close
       db_sequence_get db_sequence_remove
@@ -128,39 +128,92 @@ for them, resulting a NULL pointer on the C level.
 Functions in the BDB namespace, exported by default:
 
    $env = db_env_create (U32 env_flags = 0)
+      flags: RPCCLIENT
 
    db_env_open (DB_ENV *env, octetstring db_home, U32 open_flags, int mode, SV *callback = &PL_sv_undef)
+      open_flags: INIT_CDB INIT_LOCK INIT_LOG INIT_MPOOL INIT_REP INIT_TXN RECOVER RECOVER_FATAL USE_ENVIRON USE_ENVIRON_ROOT CREATE LOCKDOWN PRIVATE REGISTER SYSTEM_MEM
    db_env_close (DB_ENV *env, U32 flags = 0, SV *callback = &PL_sv_undef)
    db_env_txn_checkpoint (DB_ENV *env, U32 kbyte = 0, U32 min = 0, U32 flags = 0, SV *callback = &PL_sv_undef)
+      flags: FORCE
    db_env_lock_detect (DB_ENV *env, U32 flags = 0, U32 atype = DB_LOCK_DEFAULT, SV *dummy = 0, SV *callback = &PL_sv_undef)
+      atype: LOCK_DEFAULT LOCK_EXPIRE LOCK_MAXLOCKS LOCK_MAXWRITE LOCK_MINLOCKS LOCK_MINWRITE LOCK_OLDEST LOCK_RANDOM LOCK_YOUNGEST
    db_env_memp_sync (DB_ENV *env, SV *dummy = 0, SV *callback = &PL_sv_undef)
    db_env_memp_trickle (DB_ENV *env, int percent, SV *dummy = 0, SV *callback = &PL_sv_undef)
 
    $db = db_create (DB_ENV *env = 0, U32 flags = 0)
+      flags: XA_CREATE
 
    db_open (DB *db, DB_TXN_ornull *txnid, octetstring file, octetstring database, int type, U32 flags, int mode, SV *callback = &PL_sv_undef)
+      flags: AUTO_COMMIT CREATE EXCL MULTIVERSION NOMMAP RDONLY READ_UNCOMMITTED THREAD TRUNCATE
    db_close (DB *db, U32 flags = 0, SV *callback = &PL_sv_undef)
-   db_compact (DB *db, DB_TXN_ornull *txn = 0, SV *start = 0, SV *stop = 0, SV *unused1 = 0, U32 flags = DB_FREE_SPACE, SV *unused2 = 0, SV *callback = &PL_sv_unde
+      flags: DB_NOSYNC
+   db_compact (DB *db, DB_TXN_ornull *txn = 0, SV *start = 0, SV *stop = 0, SV *unused1 = 0, U32 flags = DB_FREE_SPACE, SV *unused2 = 0, SV *callback = &PL_sv_undef)
+      flags: FREELIST_ONLY FREE_SPACE
    db_sync (DB *db, U32 flags = 0, SV *callback = &PL_sv_undef)
    db_key_range (DB *db, DB_TXN_ornull *txn, SV *key, SV *key_range, U32 flags = 0, SV *callback = &PL_sv_undef)
    db_put (DB *db, DB_TXN_ornull *txn, SV *key, SV *data, U32 flags = 0, SV *callback = &PL_sv_undef)
+      flags: APPEND NODUPDATA NOOVERWRITE
    db_get (DB *db, DB_TXN_ornull *txn, SV *key, SV *data, U32 flags = 0, SV *callback = &PL_sv_undef)
+      flags: CONSUME CONSUME_WAIT GET_BOTH SET_RECNO MULTIPLE READ_COMMITTED READ_UNCOMMITTED RMW
    db_pget (DB *db, DB_TXN_ornull *txn, SV *key, SV *pkey, SV *data, U32 flags = 0, SV *callback = &PL_sv_undef)
+      flags: CONSUME CONSUME_WAIT GET_BOTH SET_RECNO MULTIPLE READ_COMMITTED READ_UNCOMMITTED RMW
    db_del (DB *db, DB_TXN_ornull *txn, SV *key, U32 flags = 0, SV *callback = &PL_sv_undef)
    db_txn_commit (DB_TXN *txn, U32 flags = 0, SV *callback = &PL_sv_undef)
+      flags: TXN_NOSYNC TXN_SYNC
    db_txn_abort (DB_TXN *txn, SV *callback = &PL_sv_undef)
+
    db_c_close (DBC *dbc, SV *callback = &PL_sv_undef)
    db_c_count (DBC *dbc, SV *count, U32 flags = 0, SV *callback = &PL_sv_undef)
    db_c_put (DBC *dbc, SV *key, SV *data, U32 flags = 0, SV *callback = &PL_sv_undef)
+      flags: AFTER BEFORE CURRENT KEYFIRST KEYLAST NODUPDATA
    db_c_get (DBC *dbc, SV *key, SV *data, U32 flags = 0, SV *callback = &PL_sv_undef)
+      flags: CURRENT FIRST GET_BOTH GET_BOTH_RANGE GET_RECNO JOIN_ITEM LAST NEXT NEXT_DUP NEXT_NODUP PREV PREV_DUP PREV_NODUP SET SET_RANGE SET_RECNO READ_UNCOMMITTED MULTIPLE MULTIPLE_KEY RMW
    db_c_pget (DBC *dbc, SV *key, SV *pkey, SV *data, U32 flags = 0, SV *callback = &PL_sv_undef)
    db_c_del (DBC *dbc, U32 flags = 0, SV *callback = &PL_sv_undef)
 
    db_sequence_open (DB_SEQUENCE *seq, DB_TXN_ornull *txnid, SV *key, U32 flags = 0, SV *callback = &PL_sv_undef)
+      flags: CREATE EXCL
    db_sequence_close (DB_SEQUENCE *seq, U32 flags = 0, SV *callback = &PL_sv_undef)
    db_sequence_get (DB_SEQUENCE *seq, DB_TXN_ornull *txnid, int delta, SV *seq_value, U32 flags = DB_TXN_NOSYNC, SV *callback = &PL_sv_undef)
+      flags: TXN_NOSYNC
    db_sequence_remove (DB_SEQUENCE *seq, DB_TXN_ornull *txnid = 0, U32 flags = 0, SV *callback = &PL_sv_undef)
+      flags: TXN_NOSYNC
 
+=head4 db_txn_finish (DB_TXN *txn, U32 flags = 0, SV *callback = &PL_sv_undef)
+
+This is not actually a Berkeley DB function but a BDB module
+extension. The background for this exytension is: It is very annoying to
+have to check every single BDB function for error returns and provide a
+codepath out of your transaction. While the BDB module still makes this
+possible, it contains the following extensions:
+
+When a transaction-protected function returns any operating system
+error (errno > 0), BDB will set the C<TXN_DEADLOCK> flag on the
+transaction. This flag is also set by Berkeley DB functions themselves
+when an operation fails with LOCK_DEADLOCK, and it causes all further
+operations on that transaction (including C<db_txn_commit>) to fail.
+
+The C<db_txn_finish> request will look at this flag, and, if it is set,
+will automatically call C<db_txn_abort> (setting errno to C<LOCK_DEADLOCK>
+if it isn't set to something else yet). If it isn't set, it will call
+C<db_txn_commit> and return the error normally.
+
+How to use this? Easy: just write your transaction normally:
+
+   my $txn = $db_env->txn_begin;
+   db_get $db, $txn, "key", my $data;
+   db_put $db, $txn, "key", $data + 1 unless $! == BDB::NOTFOUND;
+   db_txn_finish $txn;
+   die "transaction failed" if $!;
+
+That is, handle only the expected errors. If something unexpected happens
+(EIO, LOCK_NOTGRANTED or a deadlock in either db_get or db_put), then the remaining
+requests (db_put in this case) will simply be skipped (they will fail with
+LOCK_DEADLOCK) and the transaction will be aborted.
+
+You can use the C<< $txn->failed >> method to check wether a transaction
+has failed in this way and abort further processing (excluding
+C<db_txn_finish>).
 
 =head3 DB_ENV/database environment methods
 
@@ -181,7 +234,7 @@ Methods available on DB_ENV/$env handles:
    $env->set_msgfile (FILE *msgfile = 0)
    $int = $env->set_verbose (U32 which, int onoff = 1)
    $int = $env->set_encrypt (const char *password, U32 flags = 0)
-   $int = $env->set_timeout (NV timeout, U32 flags)
+   $int = $env->set_timeout (NV timeout_seconds, U32 flags = SET_TXN_TIMEOUT)
    $int = $env->set_mp_max_openfd (int maxopenfd);
    $int = $env->set_mp_max_write (int maxwrite, int maxwrite_sleep);
    $int = $env->set_mp_mmapsize (int mmapsize_mb)
@@ -193,8 +246,9 @@ Methods available on DB_ENV/$env handles:
    $int = $env->set_lg_max (U32 max)
 
    $txn = $env->txn_begin (DB_TXN_ornull *parent = 0, U32 flags = 0)
+      flags: READ_COMMITTED READ_UNCOMMITTED TXN_NOSYNC TXN_NOWAIT TXN_SNAPSHOT TXN_SYNC TXN_WAIT TXN_WRITE_NOSYNC
 
-=head4 example
+=head4 Example:
 
    use AnyEvent;
    use BDB;
@@ -231,6 +285,12 @@ Methods available on DB/$db handles:
 
    $int = $db->set_cachesize (U32 gbytes, U32 bytes, int ncache = 0)
    $int = $db->set_flags (U32 flags)
+      flags: CHKSUM ENCRYPT TXN_NOT_DURABLE
+             Btree: DUP DUPSORT RECNUM REVSPLITOFF
+             Hash:  DUP DUPSORT
+             Queue: INORDER
+             Recno: RENUMBER SNAPSHOT
+
    $int = $db->set_encrypt (const char *password, U32 flags)
    $int = $db->set_lorder (int lorder)
    $int = $db->set_bt_minkey (U32 minkey)
@@ -243,9 +303,10 @@ Methods available on DB/$db handles:
    $int = $db->set_q_extentsize (U32 extentsize)
 
    $dbc = $db->cursor (DB_TXN_ornull *txn = 0, U32 flags = 0)
+      flags: READ_COMMITTED READ_UNCOMMITTED WRITECURSOR TXN_SNAPSHOT
    $seq = $db->sequence (U32 flags = 0)
 
-=head4 example
+=head4 Example:
 
    my $db = db_create $env;
    db_open $db, undef, "table", undef, BDB::BTREE, BDB::AUTO_COMMIT | BDB::CREATE | BDB::READ_UNCOMMITTED, 0600;
@@ -271,7 +332,11 @@ Methods available on DB_TXN/$txn handles:
            if (txn)
              txn->abort (txn);
 
-   $int = $txn->set_timeout (NV timeout, U32 flags)
+   $int = $txn->set_timeout (NV timeout_seconds, U32 flags = SET_TXN_TIMEOUT)
+      flags: SET_LOCK_TIMEOUT SET_TXN_TIMEOUT
+
+   $bool = $txn->failed
+   # see db_txn_finish documentation, above
 
 
 =head3 DBC/cursor methods
@@ -283,7 +348,7 @@ Methods available on DBC/$dbc handles:
            if (dbc)
              dbc->c_close (dbc);
 
-=head4 example
+=head4 Example:
 
    my $c = $db->cursor;
 
@@ -294,6 +359,7 @@ Methods available on DBC/$dbc handles:
    }
 
    db_c_close $c;
+
 
 =head3 DB_SEQUENCE/sequence methods
 
@@ -307,9 +373,10 @@ Methods available on DB_SEQUENCE/$seq handles:
    $int = $seq->initial_value (db_seq_t value)
    $int = $seq->set_cachesize (U32 size)
    $int = $seq->set_flags (U32 flags)
+      flags: SEQ_DEC SEQ_INC SEQ_WRAP
    $int = $seq->set_range (db_seq_t min, db_seq_t max)
 
-=head4 example
+=head4 Example:
 
    my $seq = $db->sequence;
       
@@ -572,7 +639,7 @@ a few hundred bytes), readdir requires a result buffer and so on. Perl
 scalars and other data passed into aio requests will also be locked and
 will consume memory till the request has entered the done state.
 
-This is now awfully much, so queuing lots of requests is not usually a
+This is not awfully much, so queuing lots of requests is not usually a
 problem.
 
 Per-thread usage:
@@ -583,7 +650,12 @@ structures (usually around 16k-128k, depending on the OS).
 
 =head1 KNOWN BUGS
 
-Known bugs will be fixed in the next release.
+Known bugs will be fixed in the next release, except:
+
+   If you use a transaction in any request, and the request returns
+   with an operating system error or DB_LOCK_NOTGRANTED, the internal
+   TXN_DEADLOCK flag will be set on the transaction. See C<db_txn_finish>,
+   above.
 
 =head1 SEE ALSO
 

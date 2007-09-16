@@ -106,7 +106,7 @@ enum {
   REQ_ENV_MEMP_SYNC, REQ_ENV_MEMP_TRICKLE,
   REQ_DB_OPEN, REQ_DB_CLOSE, REQ_DB_COMPACT, REQ_DB_SYNC,
   REQ_DB_PUT, REQ_DB_GET, REQ_DB_PGET, REQ_DB_DEL, REQ_DB_KEY_RANGE,
-  REQ_TXN_COMMIT, REQ_TXN_ABORT,
+  REQ_TXN_COMMIT, REQ_TXN_ABORT, REQ_TXN_FINISH,
   REQ_C_CLOSE, REQ_C_COUNT, REQ_C_PUT, REQ_C_GET, REQ_C_PGET, REQ_C_DEL,
   REQ_SEQ_OPEN, REQ_SEQ_CLOSE, REQ_SEQ_GET, REQ_SEQ_REMOVE,
 };
@@ -670,6 +670,7 @@ X_THREAD_PROC (bdb_proc)
       switch (req->type)
         {
           case REQ_QUIT:
+            req->result = ENOSYS;
             goto quit;
 
           case REQ_ENV_OPEN:
@@ -740,6 +741,17 @@ X_THREAD_PROC (bdb_proc)
             req->result = req->txn->abort (req->txn);
             break;
 
+          case REQ_TXN_FINISH:
+            if (req->txn->flags & TXN_DEADLOCK)
+              {
+                req->result = req->txn->abort (req->txn);
+                if (!req->result)
+                  req->result = DB_LOCK_DEADLOCK;
+              }
+            else
+              req->result = req->txn->commit (req->txn, req->uint1);
+            break;
+
           case REQ_C_CLOSE:
             req->result = req->dbc->c_close (req->dbc);
             break;
@@ -788,6 +800,9 @@ X_THREAD_PROC (bdb_proc)
             req->result = ENOSYS;
             break;
         }
+
+      if (req->txn && (req->result > 0 || req->result == DB_LOCK_NOTGRANTED))
+        req->txn->flags |= TXN_DEADLOCK;
 
       X_LOCK (reslock);
 
@@ -1502,6 +1517,17 @@ db_txn_abort (DB_TXN *txn, SV *callback = &PL_sv_undef)
 }
 
 void
+db_txn_finish (DB_TXN *txn, U32 flags = 0, SV *callback = &PL_sv_undef)
+	CODE:
+{
+        dREQ (REQ_TXN_FINISH);
+        req->txn   = txn;
+        req->uint1 = flags;
+        REQ_SEND;
+        ptr_nuke (ST (0));
+}
+
+void
 db_c_close (DBC *dbc, SV *callback = &PL_sv_undef)
 	CODE:
 {
@@ -1709,7 +1735,7 @@ int set_encrypt (DB_ENV *env, const char *password, U32 flags = 0)
 	OUTPUT:
         RETVAL
 
-int set_timeout (DB_ENV *env, NV timeout, U32 flags)
+int set_timeout (DB_ENV *env, NV timeout, U32 flags = DB_SET_TXN_TIMEOUT)
 	CODE:
         RETVAL = env->set_timeout (env, timeout * 1000000, flags);
 	OUTPUT:
@@ -1891,9 +1917,15 @@ DESTROY (DB_TXN_ornull *txn)
         if (txn)
           txn->abort (txn);
 
-int set_timeout (DB_TXN *txn, NV timeout, U32 flags)
+int set_timeout (DB_TXN *txn, NV timeout, U32 flags = DB_SET_TXN_TIMEOUT)
 	CODE:
         RETVAL = txn->set_timeout (txn, timeout * 1000000, flags);
+	OUTPUT:
+        RETVAL
+
+int failed (DB_TXN *txn)
+	CODE:
+        RETVAL = !!(txn->flags & TXN_DEADLOCK);
 	OUTPUT:
         RETVAL
 

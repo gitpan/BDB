@@ -1,5 +1,11 @@
 Revision history for perl module BDB.
 
+1.1  Sun Sep 16 20:15:55 CEST 2007
+	- flag and check TXN_DEADLOCK flag for easier transaction
+          programming (see db_txn_finish).
+        - new custom db_txn_finish request.
+	- improved docs.
+
 1.0  Mon Aug 13 14:02:42 CEST 2007
 	- some updates for db 4.6.
         - vastly improved documentation, i.e. there is some now.
