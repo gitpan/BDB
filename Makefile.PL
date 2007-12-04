@@ -38,7 +38,7 @@ EOF
 
 my $mm = MM->new({
     dist         => {
-       PREOP	=> 'pod2text AIO.pm | tee README >$(DISTVNAME)/README; chmod -R u=rwX,go=rX . ;',
+       PREOP	=> 'pod2text BDB.pm | tee README >$(DISTVNAME)/README; chmod -R u=rwX,go=rX . ;',
        COMPRESS	=> 'gzip -9v',
        SUFFIX	=> '.gz',
 	            },

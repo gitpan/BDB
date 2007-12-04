@@ -1,5 +1,12 @@
 Revision history for perl module BDB.
 
+1.2  Tue Dec  4 11:12:47 CET 2007
+	- after fork, invest some work to make sure that the poll_fileno
+          stays stable (by dup2'ing the new fd over the old one), to make
+          it easier for programs/libs that don't control their forking
+          behaviour and cannot recreate their watchers.
+        - added missing DB::RDONLY (reported by Danny).
+
 1.1  Sun Sep 16 20:15:55 CEST 2007
 	- flag and check TXN_DEADLOCK flag for easier transaction
           programming (see db_txn_finish).
