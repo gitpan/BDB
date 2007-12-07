@@ -6,6 +6,41 @@ BDB - Asynchronous Berkeley DB access
 
  use BDB;
 
+ my $env = db_env_create;
+
+ mkdir "bdtest", 0700;
+ db_env_open
+    $env,
+    "bdtest",
+    BDB::INIT_LOCK | BDB::INIT_LOG | BDB::INIT_MPOOL
+    | BDB::INIT_TXN | BDB::RECOVER | BDB::USE_ENVIRON | BDB::CREATE,
+    0600;
+
+ $env->set_flags (BDB::AUTO_COMMIT | BDB::TXN_NOSYNC, 1);
+
+ my $db = db_create $env;
+ db_open $db, undef, "table", undef, BDB::BTREE, BDB::AUTO_COMMIT | BDB::CREATE
+                                     | BDB::READ_UNCOMMITTED, 0600;
+ db_put $db, undef, "key", "data", 0, sub {
+    db_del $db, undef, "key";
+ };
+ db_sync $db;
+
+ # automatic result processing with AnyEvent:
+ our $FH; open $FH, "<&=" . BDB::poll_fileno;
+ our $WATCHER = AnyEvent->io (fh => $FH, poll => 'r', cb => \&BDB::poll_cb);
+
+ # automatic result processing with EV:
+ my $WATCHER = EV::io BDB::poll_fileno, EV::READ, \&BDB::poll_cb;
+
+ # with Glib:
+ add_watch Glib::IO BDB::poll_fileno,
+           in => sub { BDB::poll_cb; 1 };
+
+ # or simply flush manually
+ BDB::flush;
+
+
 =head1 DESCRIPTION
 
 See the BerkeleyDB documentation (L<http://www.oracle.com/technology/documentation/berkeley-db/db/index.html>).
@@ -74,7 +109,7 @@ use strict 'vars';
 use base 'Exporter';
 
 BEGIN {
-   our $VERSION = '1.2';
+   our $VERSION = '1.3';
 
    our @BDB_REQ = qw(
       db_env_open db_env_close db_env_txn_checkpoint db_env_lock_detect
@@ -244,6 +279,10 @@ Methods available on DB_ENV/$env handles:
    $int = $env->set_lk_max_objects (U32 max)
    $int = $env->set_lg_bsize (U32 max)
    $int = $env->set_lg_max (U32 max)
+   $int = $env->mutex_set_increment (U32 increment)
+   $int = $env->mutex_set_tas_spins (U32 tas_spins)
+   $int = $env->mutex_set_max (U32 max)
+   $int = $env->mutex_set_align (U32 align)
 
    $txn = $env->txn_begin (DB_TXN_ornull *parent = 0, U32 flags = 0)
       flags: READ_COMMITTED READ_UNCOMMITTED TXN_NOSYNC TXN_NOWAIT TXN_SNAPSHOT TXN_SYNC TXN_WAIT TXN_WRITE_NOSYNC
@@ -437,17 +476,14 @@ time.
 
 For interactive programs, values such as C<0.01> to C<0.1> should be fine.
 
-Example: Install an Event watcher that automatically calls
+Example: Install an EV watcher that automatically calls
 BDB::poll_cb with low priority, to ensure that other parts of the
-program get the CPU sometimes even under high AIO load.
+program get the CPU sometimes even under high load.
 
    # try not to spend much more than 0.1s in poll_cb
    BDB::max_poll_time 0.1;
 
-   # use a low priority so other tasks have priority
-   Event->io (fd => BDB::poll_fileno,
-              poll => 'r', nice => 1,
-              cb => &BDB::poll_cb);
+   my $bdb_poll = EV::io BDB::poll_fileno, EV::READ, \&BDB::poll_cb);
 
 =item BDB::poll_wait
 
@@ -469,7 +505,7 @@ equivalent to:
 
 =item BDB::flush
 
-Wait till all outstanding AIO requests have been handled.
+Wait till all outstanding BDB requests have been handled.
 
 Strictly equivalent to:
 
@@ -484,12 +520,12 @@ Strictly equivalent to:
 
 =item BDB::min_parallel $nthreads
 
-Set the minimum number of AIO threads to C<$nthreads>. The current
+Set the minimum number of BDB threads to C<$nthreads>. The current
 default is C<8>, which means eight asynchronous operations can execute
 concurrently at any one time (the number of outstanding requests,
 however, is unlimited).
 
-BDB starts threads only on demand, when an AIO request is queued and
+BDB starts threads only on demand, when an BDB request is queued and
 no free thread exists. Please note that queueing up a hundred requests can
 create demand for a hundred threads, even if it turns out that everything
 is in the cache and could have been processed faster by a single thread.
@@ -504,7 +540,7 @@ module selects a default that is suitable for low to moderate load.
 
 =item BDB::max_parallel $nthreads
 
-Sets the maximum number of AIO threads to C<$nthreads>. If more than the
+Sets the maximum number of BDB threads to C<$nthreads>. If more than the
 specified number of threads are currently running, this function kills
 them. This function blocks until the limit is reached.
 
@@ -617,7 +653,7 @@ END { flush }
 
 This module should do "the right thing" when the process using it forks:
 
-Before the fork, IO::AIO enters a quiescent state where no requests
+Before the fork, BDB enters a quiescent state where no requests
 can be added in other threads and no results will be processed. After
 the fork the parent simply leaves the quiescent state and continues
 request/result processing, while the child frees the request/result queue
@@ -626,7 +662,7 @@ parent). Threads will be started on demand until the limit set in the
 parent process has been reached again.
 
 In short: the parent will, after a short pause, continue as if fork had
-not been called, while the child will act as if IO::AIO has not been used
+not been called, while the child will act as if BDB has not been used
 yet.
 
 =head2 MEMORY USAGE
@@ -659,7 +695,7 @@ Known bugs will be fixed in the next release, except:
 
 =head1 SEE ALSO
 
-L<Coro::AIO>.
+L<Coro::BDB>, L<IO::AIO>.
 
 =head1 AUTHOR
 

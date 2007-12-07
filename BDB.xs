@@ -328,6 +328,12 @@ static int req_invoke (aio_req req)
             dbt_to_sv (req->sv3, &req->dbt3);
             break;
 
+          case REQ_DB_PUT:
+          case REQ_C_PUT:
+            dbt_to_sv (0, &req->dbt1);
+            dbt_to_sv (0, &req->dbt2);
+            break;
+
           case REQ_DB_KEY_RANGE:
             {
               AV *av = newAV ();
@@ -346,9 +352,9 @@ static int req_invoke (aio_req req)
             SvREADONLY_off (req->sv1);
 
             if (sizeof (IV) > 4)
-              sv_setiv_mg (req->sv1, req->seq_t);
+              sv_setiv_mg (req->sv1, (IV)req->seq_t);
             else
-              sv_setnv_mg (req->sv1, req->seq_t);
+              sv_setnv_mg (req->sv1, (NV)req->seq_t);
 
             SvREFCNT_dec (req->sv1);
             break;
@@ -383,6 +389,9 @@ static void req_free (aio_req req)
 static void
 create_respipe ()
 {
+#ifdef _WIN32
+  int arg; /* argg */
+#endif
   int old_readfd = respipe [0];
 
   if (respipe [1] >= 0)
@@ -405,7 +414,7 @@ create_respipe ()
     }
 
 #ifdef _WIN32
-  int arg = 1;
+  arg = 1;
   if (ioctlsocket (TO_SOCKET (respipe [0]), FIONBIO, &arg)
       || ioctlsocket (TO_SOCKET (respipe [1]), FIONBIO, &arg))
 #else
@@ -1810,6 +1819,30 @@ int set_lg_max (DB_ENV *env, U32 max)
 	CODE:
         RETVAL = env->set_lg_max (env, max);
 	OUTPUT:
+        RETVAL
+
+int mutex_set_max (DB_ENV *env, U32 max)
+        CODE:
+        RETVAL = env->mutex_set_max (env, max);
+        OUTPUT:
+        RETVAL
+
+int mutex_set_increment (DB_ENV *env, U32 increment)
+        CODE:
+        RETVAL = env->mutex_set_increment (env, increment);
+        OUTPUT:
+        RETVAL
+
+int mutex_set_tas_spins (DB_ENV *env, U32 tas_spins)
+        CODE:
+        RETVAL = env->mutex_set_tas_spins (env, tas_spins);
+        OUTPUT:
+        RETVAL
+
+int mutex_set_align (DB_ENV *env, U32 align)
+        CODE:
+        RETVAL = env->mutex_set_align (env, align);
+        OUTPUT:
         RETVAL
 
 DB_TXN *
