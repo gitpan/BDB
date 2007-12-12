@@ -104,7 +104,7 @@ enum {
   REQ_QUIT,
   REQ_ENV_OPEN, REQ_ENV_CLOSE, REQ_ENV_TXN_CHECKPOINT, REQ_ENV_LOCK_DETECT,
   REQ_ENV_MEMP_SYNC, REQ_ENV_MEMP_TRICKLE,
-  REQ_DB_OPEN, REQ_DB_CLOSE, REQ_DB_COMPACT, REQ_DB_SYNC,
+  REQ_DB_OPEN, REQ_DB_CLOSE, REQ_DB_COMPACT, REQ_DB_SYNC, REQ_DB_UPGRADE,
   REQ_DB_PUT, REQ_DB_GET, REQ_DB_PGET, REQ_DB_DEL, REQ_DB_KEY_RANGE,
   REQ_TXN_COMMIT, REQ_TXN_ABORT, REQ_TXN_FINISH,
   REQ_C_CLOSE, REQ_C_COUNT, REQ_C_PUT, REQ_C_GET, REQ_C_PGET, REQ_C_DEL,
@@ -741,6 +741,10 @@ X_THREAD_PROC (bdb_proc)
             req->result = req->db->sync (req->db, req->uint1);
             break;
 
+          case REQ_DB_UPGRADE:
+            req->result = req->db->upgrade (req->db, req->buf1, req->uint1);
+            break;
+
           case REQ_DB_PUT:
             req->result = req->db->put (req->db, req->txn, &req->dbt1, &req->dbt2, req->uint1);
             break;
@@ -1095,7 +1099,6 @@ BOOT:
           const_iv (NOSERVER_HOME)
           const_iv (NOSERVER_ID)
           const_iv (NOTFOUND)
-          const_iv (OLD_VERSION)
           const_iv (PAGE_NOTFOUND)
           const_iv (REP_DUPMASTER)
           const_iv (REP_HANDLE_DEAD)
@@ -1142,8 +1145,8 @@ BOOT:
         for (civ = const_iv + sizeof (const_iv) / sizeof (const_iv [0]); civ-- > const_iv; )
           newCONSTSUB (stash, (char *)civ->name, newSViv (civ->iv));
 
-        newCONSTSUB (stash, "DB_VERSION", newSVnv (DB_VERSION_MAJOR + DB_VERSION_MINOR * .1));
-        newCONSTSUB (stash, "DB_VERSION_STRING", newSVpv (DB_VERSION_STRING, 0));
+        newCONSTSUB (stash, "VERSION", newSVnv (DB_VERSION_MAJOR + DB_VERSION_MINOR * .1));
+        newCONSTSUB (stash, "VERSION_STRING", newSVpv (DB_VERSION_STRING, 0));
 
         create_respipe ();
 
@@ -1455,6 +1458,17 @@ db_sync (DB *db, U32 flags = 0, SV *callback = &PL_sv_undef)
 }
 
 void
+db_upgrade (DB *db, octetstring file, U32 flags = 0, SV *callback = &PL_sv_undef)
+	CODE:
+{
+        dREQ (REQ_DB_SYNC);
+        req->db    = db;
+        req->buf1  = strdup (file);
+        req->uint1 = flags;
+        REQ_SEND;
+}
+
+void
 db_key_range (DB *db, DB_TXN_ornull *txn, SV *key, SV *key_range, U32 flags = 0, SV *callback = &PL_sv_undef)
 	CODE:
 {
@@ -1735,7 +1749,7 @@ int set_cachesize (DB_ENV *env, U32 gbytes, U32 bytes, int ncache = 0)
 	OUTPUT:
         RETVAL
 
-int set_flags (DB_ENV *env, U32 flags, int onoff)
+int set_flags (DB_ENV *env, U32 flags, int onoff = 1)
 	CODE:
         RETVAL = env->set_flags (env, flags, onoff);
 	OUTPUT:
@@ -1749,7 +1763,7 @@ void set_msgfile (DB_ENV *env, FILE *msgfile = 0)
 	CODE:
         env->set_msgfile (env, msgfile);
 
-int set_verbose (DB_ENV *env, U32 which, int onoff = 1)
+int set_verbose (DB_ENV *env, U32 which = -1, int onoff = 1)
 	CODE:
         RETVAL = env->set_verbose (env, which, onoff);
 	OUTPUT:

@@ -89,8 +89,9 @@ REQUEST ANATOMY AND LIFETIME
   BERKELEYDB FUNCTIONS
     All of these are functions. The create functions simply return a new
     object and never block. All the remaining functions all take an optional
-    callback as last argument. If it is missing, then the fucntion will be
-    executed synchronously.
+    callback as last argument. If it is missing, then the function will be
+    executed synchronously. In both cases, $! will reflect the return value
+    of the function.
 
     BDB functions that cannot block (mostly functions that manipulate
     settings) are method calls on the relevant objects, so the rule of thumb
@@ -134,6 +135,7 @@ REQUEST ANATOMY AND LIFETIME
           flags: AUTO_COMMIT CREATE EXCL MULTIVERSION NOMMAP RDONLY READ_UNCOMMITTED THREAD TRUNCATE
        db_close (DB *db, U32 flags = 0, SV *callback = &PL_sv_undef)
           flags: DB_NOSYNC
+       db_upgrade (DB *db, octetstring file, U32 flags = 0, SV *callback = &PL_sv_undef)
        db_compact (DB *db, DB_TXN_ornull *txn = 0, SV *start = 0, SV *stop = 0, SV *unused1 = 0, U32 flags = DB_FREE_SPACE, SV *unused2 = 0, SV *callback = &PL_sv_undef)
           flags: FREELIST_ONLY FREE_SPACE
        db_sync (DB *db, U32 flags = 0, SV *callback = &PL_sv_undef)
@@ -362,6 +364,10 @@ REQUEST ANATOMY AND LIFETIME
 
   SUPPORT FUNCTIONS
    EVENT PROCESSING AND EVENT LOOP INTEGRATION
+    $msg = BDB::strerror [$errno]
+        Returns the string corresponding to the given errno value. If no
+        argument is given, use $!.
+
     $fileno = BDB::poll_fileno
         Return the *request result pipe file descriptor*. This filehandle
         must be polled for reading by some mechanism outside this module
@@ -557,6 +563,10 @@ REQUEST ANATOMY AND LIFETIME
     In short: the parent will, after a short pause, continue as if fork had
     not been called, while the child will act as if BDB has not been used
     yet.
+
+    Win32 note: there is no fork on win32, and perls emulation of it is too
+    broken to be supported, so do not use BDB in a windows pseudo-fork,
+    better yet, switch to a more capable platform.
 
   MEMORY USAGE
     Per-request usage:

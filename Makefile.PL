@@ -8,6 +8,7 @@ if ($^O =~ /win32/i or $^O =~ /mswin/) {
 
    warn "your platform is not standards-compliant, you have to port this module first\n";
    warn "using some hardcoded config that will not work on your system\n";
+   warn "hint: edit the Makefile.PL\n\n";
 
    $INC  = "-I/Perl/lib/CORE -I/sdk/include -I/vc98/include -I/gtk/include -I/gtk/include/pango-1.0 -I/gtk/include/glib-2.0 -I/gtk/lib/glib-2.0/include/ -I/gtk/include/freetype2";
    $LIBS = ["-L/gtk/lib -ldb45 -lpthreadVC2"];

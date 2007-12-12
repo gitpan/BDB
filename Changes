@@ -1,5 +1,11 @@
 Revision history for perl module BDB.
 
+1.4  Wed Dec 12 02:20:39 CET 2007
+	- new globals BDB::VERSION and ..VERSION_STRING.
+        - add db_upgrade.
+        - do not die in DESTROY after explicit db_close and similar
+          operations.
+
 1.3  Fri Dec  7 14:36:25 CET 2007
         - db_put and c_put leaked memory like hell (reported by Danny).
 	- de-IO::AIO-ify the documentation.

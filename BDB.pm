@@ -109,12 +109,13 @@ use strict 'vars';
 use base 'Exporter';
 
 BEGIN {
-   our $VERSION = '1.3';
+   our $VERSION = '1.4';
 
    our @BDB_REQ = qw(
       db_env_open db_env_close db_env_txn_checkpoint db_env_lock_detect
       db_env_memp_sync db_env_memp_trickle
-      db_open db_close db_compact db_sync db_put db_get db_pget db_del db_key_range
+      db_open db_close db_compact db_sync db_upgrade
+      db_put db_get db_pget db_del db_key_range
       db_txn_commit db_txn_abort db_txn_finish
       db_c_close db_c_count db_c_put db_c_get db_c_pget db_c_del
       db_sequence_open db_sequence_close
@@ -136,8 +137,9 @@ BEGIN {
 
 All of these are functions. The create functions simply return a new
 object and never block. All the remaining functions all take an optional
-callback as last argument. If it is missing, then the fucntion will be
-executed synchronously.
+callback as last argument. If it is missing, then the function will be
+executed synchronously. In both cases, C<$!> will reflect the return value
+of the function.
 
 BDB functions that cannot block (mostly functions that manipulate
 settings) are method calls on the relevant objects, so the rule of thumb
@@ -182,6 +184,7 @@ Functions in the BDB namespace, exported by default:
       flags: AUTO_COMMIT CREATE EXCL MULTIVERSION NOMMAP RDONLY READ_UNCOMMITTED THREAD TRUNCATE
    db_close (DB *db, U32 flags = 0, SV *callback = &PL_sv_undef)
       flags: DB_NOSYNC
+   db_upgrade (DB *db, octetstring file, U32 flags = 0, SV *callback = &PL_sv_undef)
    db_compact (DB *db, DB_TXN_ornull *txn = 0, SV *start = 0, SV *stop = 0, SV *unused1 = 0, U32 flags = DB_FREE_SPACE, SV *unused2 = 0, SV *callback = &PL_sv_undef)
       flags: FREELIST_ONLY FREE_SPACE
    db_sync (DB *db, U32 flags = 0, SV *callback = &PL_sv_undef)
@@ -429,6 +432,11 @@ Methods available on DB_SEQUENCE/$seq handles:
 
 =over 4
 
+=item $msg = BDB::strerror [$errno]
+
+Returns the string corresponding to the given errno value. If no argument
+is given, use C<$!>.
+
 =item $fileno = BDB::poll_fileno
 
 Return the I<request result pipe file descriptor>. This filehandle must be
@@ -664,6 +672,10 @@ parent process has been reached again.
 In short: the parent will, after a short pause, continue as if fork had
 not been called, while the child will act as if BDB has not been used
 yet.
+
+Win32 note: there is no fork on win32, and perls emulation of it is too
+broken to be supported, so do not use BDB in a windows pseudo-fork, better
+yet, switch to a more capable platform.
 
 =head2 MEMORY USAGE
 
