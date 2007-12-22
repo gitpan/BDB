@@ -24,6 +24,9 @@ SYNOPSIS
      };
      db_sync $db;
 
+     # when you also use Coro, management is easy:
+     use Coro::BDB;
+
      # automatic result processing with AnyEvent:
      our $FH; open $FH, "<&=" . BDB::poll_fileno;
      our $WATCHER = AnyEvent->io (fh => $FH, poll => 'r', cb => \&BDB::poll_cb);
@@ -330,6 +333,8 @@ REQUEST ANATOMY AND LIFETIME
                CODE:
                if (dbc)
                  dbc->c_close (dbc);
+
+       $int = $cursor->set_priority ($priority = PRIORITY_*)
 
    Example:
        my $c = $db->cursor;

@@ -111,9 +111,9 @@ enum {
   REQ_SEQ_OPEN, REQ_SEQ_CLOSE, REQ_SEQ_GET, REQ_SEQ_REMOVE,
 };
 
-typedef struct aio_cb
+typedef struct bdb_cb
 {
-  struct aio_cb *volatile next;
+  struct bdb_cb *volatile next;
   SV *callback;
   int type, pri, result;
 
@@ -132,9 +132,9 @@ typedef struct aio_cb
   DB_KEY_RANGE key_range;
   DB_SEQUENCE *seq;
   db_seq_t seq_t;
-} aio_cb;
+} bdb_cb;
 
-typedef aio_cb *aio_req;
+typedef bdb_cb *bdb_req;
 
 enum {
   PRI_MIN     = -4,
@@ -171,7 +171,7 @@ typedef struct worker {
   thread_t tid;
 
   /* locked by reslock, reqlock or wrklock */
-  aio_req req; /* currently processed request */
+  bdb_req req; /* currently processed request */
   void *dbuf;
   DIR *dirp;
 } worker;
@@ -248,14 +248,14 @@ static unsigned int get_nthreads ()
  * per shift, the most expensive operation.
  */
 typedef struct {
-  aio_req qs[NUM_PRI], qe[NUM_PRI]; /* qstart, qend */
+  bdb_req qs[NUM_PRI], qe[NUM_PRI]; /* qstart, qend */
   int size;
 } reqq;
 
 static reqq req_queue;
 static reqq res_queue;
 
-int reqq_push (reqq *q, aio_req req)
+int reqq_push (reqq *q, bdb_req req)
 {
   int pri = req->pri;
   req->next = 0;
@@ -271,7 +271,7 @@ int reqq_push (reqq *q, aio_req req)
   return q->size++;
 }
 
-aio_req reqq_shift (reqq *q)
+bdb_req reqq_shift (reqq *q)
 {
   int pri;
 
@@ -282,7 +282,7 @@ aio_req reqq_shift (reqq *q)
 
   for (pri = NUM_PRI; pri--; )
     {
-      aio_req req = q->qs[pri];
+      bdb_req req = q->qs[pri];
 
       if (req)
         {
@@ -297,10 +297,10 @@ aio_req reqq_shift (reqq *q)
 }
 
 static int poll_cb ();
-static void req_free (aio_req req);
-static void req_cancel (aio_req req);
+static void req_free (bdb_req req);
+static void req_cancel (bdb_req req);
 
-static int req_invoke (aio_req req)
+static int req_invoke (bdb_req req)
 {
   dSP;
 
@@ -373,7 +373,7 @@ static int req_invoke (aio_req req)
   return !SvTRUE (ERRSV);
 }
 
-static void req_free (aio_req req)
+static void req_free (bdb_req req)
 {
   free (req->buf1);
   free (req->buf2);
@@ -463,7 +463,7 @@ static void maybe_start_thread ()
   start_thread ();
 }
 
-static void req_send (aio_req req)
+static void req_send (bdb_req req)
 {
   SV *wait_callback = 0;
 
@@ -481,7 +481,7 @@ static void req_send (aio_req req)
       if (count != 2)
         croak ("prepare callback must return exactly two values\n");
 
-      wait_callback = SvREFCNT_inc (POPs);
+      wait_callback = POPs;
       SvREFCNT_dec (req->callback);
       req->callback = SvREFCNT_inc (POPs);
     }
@@ -502,15 +502,14 @@ static void req_send (aio_req req)
       PUSHMARK (SP);
       PUTBACK;
       call_sv (wait_callback, G_DISCARD);
-      SvREFCNT_dec (wait_callback);
     }
 }
 
 static void end_thread (void)
 {
-  aio_req req;
+  bdb_req req;
 
-  Newz (0, req, 1, aio_cb);
+  Newz (0, req, 1, bdb_cb);
 
   req->type = REQ_QUIT;
   req->pri  = PRI_MAX + PRI_BIAS;
@@ -577,7 +576,7 @@ static int poll_cb ()
   int maxreqs = max_poll_reqs;
   int do_croak = 0;
   struct timeval tv_start, tv_now;
-  aio_req req;
+  bdb_req req;
 
   if (max_poll_time)
     gettimeofday (&tv_start, 0);
@@ -648,7 +647,7 @@ static int poll_cb ()
 
 X_THREAD_PROC (bdb_proc)
 {
-  aio_req req;
+  bdb_req req;
   struct timespec ts;
   worker *self = (worker *)thr_arg;
 
@@ -876,7 +875,7 @@ static void atfork_parent (void)
 
 static void atfork_child (void)
 {
-  aio_req prv;
+  bdb_req prv;
 
   while (prv = reqq_shift (&req_queue))
     req_free (prv);
@@ -907,16 +906,16 @@ static void atfork_child (void)
 }
 
 #define dREQ(reqtype)						\
-  aio_req req;							\
+  bdb_req req;							\
   int req_pri = next_pri;					\
   next_pri = DEFAULT_PRI + PRI_BIAS;				\
 								\
   if (SvOK (callback) && !SvROK (callback))			\
     croak ("callback must be undef or of reference type");	\
 								\
-  Newz (0, req, 1, aio_cb);	        			\
+  Newz (0, req, 1, bdb_cb);	        			\
   if (!req)							\
-    croak ("out of memory during aio_req allocation");		\
+    croak ("out of memory during bdb_req allocation");		\
 								\
   req->callback = newSVsv (callback);				\
   req->type = (reqtype); 					\
@@ -1030,6 +1029,7 @@ BOOT:
           //const_iv (MULTIPLE)
           const_iv (SNAPSHOT)
           const_iv (JOIN_ITEM)
+          const_iv (JOIN_NOSORT)
           const_iv (RMW)
 
           const_iv (NOTFOUND)
@@ -1055,7 +1055,6 @@ BOOT:
           const_iv (SET_LOCK_TIMEOUT)
           const_iv (SET_TXN_TIMEOUT)
 
-          const_iv (JOIN_ITEM)
           const_iv (FIRST)
           const_iv (NEXT)
           const_iv (NEXT_DUP)
@@ -1131,14 +1130,12 @@ BOOT:
 #endif
 #if DB_VERSION_MINOR >= 6
           const_iv (PREV_DUP)
-# if 0
           const_iv (PRIORITY_UNCHANGED)
           const_iv (PRIORITY_VERY_LOW)
           const_iv (PRIORITY_LOW)
           const_iv (PRIORITY_DEFAULT)
           const_iv (PRIORITY_HIGH)
           const_iv (PRIORITY_VERY_HIGH)
-# endif
 #endif
         };
 
@@ -1497,6 +1494,8 @@ db_put (DB *db, DB_TXN_ornull *txn, SV *key, SV *data, U32 flags = 0, SV *callba
 void
 db_get (DB *db, DB_TXN_ornull *txn, SV *key, SV *data, U32 flags = 0, SV *callback = &PL_sv_undef)
 	CODE:
+        if (SvREADONLY (data))
+          croak ("can't modify read-only data scalar in db_get");
 {
         dREQ (REQ_DB_GET);
         req->db    = db;
@@ -1511,6 +1510,8 @@ db_get (DB *db, DB_TXN_ornull *txn, SV *key, SV *data, U32 flags = 0, SV *callba
 void
 db_pget (DB *db, DB_TXN_ornull *txn, SV *key, SV *pkey, SV *data, U32 flags = 0, SV *callback = &PL_sv_undef)
 	CODE:
+        if (SvREADONLY (data))
+          croak ("can't modify read-only data scalar in db_pget");
 {
         dREQ (REQ_DB_PGET);
         req->db    = db;
@@ -2001,6 +2002,14 @@ DESTROY (DBC_ornull *dbc)
 	CODE:
         if (dbc)
           dbc->c_close (dbc);
+
+#if DB_VERSION_MINOR >= 6
+
+int set_priority (DBC *dbc, int priority)
+        CODE:
+        dbc->set_priority (dbc, priority);
+
+#endif
 
 MODULE = BDB		PACKAGE = BDB::Sequence
 

@@ -1,5 +1,10 @@
 Revision history for perl module BDB.
 
+1.41 Sat Dec 22 08:32:41 CET 2007
+	- add cursor->set_priority.
+        - minor optimisations and checks.
+        - port to microsoft pseudo-C again.
+
 1.4  Wed Dec 12 02:20:39 CET 2007
 	- new globals BDB::VERSION and ..VERSION_STRING.
         - add db_upgrade.
