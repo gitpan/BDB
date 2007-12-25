@@ -1327,8 +1327,6 @@ db_env_open (DB_ENV *env, octetstring db_home, U32 open_flags, int mode, SV *cal
 {
         dREQ (REQ_ENV_OPEN);
 
-  	env->set_thread_count (env, wanted + 2);
-
         req->env   = env;
         req->uint1 = open_flags | DB_THREAD;
         req->int1  = mode;

@@ -1,5 +1,8 @@
 Revision history for perl module BDB.
 
+1.42 Tue Dec 25 15:22:50 CET 2007
+	- do not automatically call set_thread_count.
+
 1.41 Sat Dec 22 08:32:41 CET 2007
 	- add cursor->set_priority.
         - minor optimisations and checks.
