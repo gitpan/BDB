@@ -42,6 +42,12 @@ typedef DBC         DBC_ornull;
 typedef DB          DB_ornull;
 typedef DB_SEQUENCE DB_SEQUENCE_ornull;
 
+typedef DB_ENV      DB_ENV_ornuked;
+typedef DB_TXN      DB_TXN_ornuked;
+typedef DBC         DBC_ornuked;
+typedef DB          DB_ornuked;
+typedef DB_SEQUENCE DB_SEQUENCE_ornuked;
+
 typedef SV SV8; /* byte-sv, used for argument-checking */
 typedef char *octetstring;
 
@@ -924,10 +930,10 @@ static void atfork_child (void)
 #define REQ_SEND						\
   req_send (req)
 
-#define SvPTR(var, arg, type, class, nullok)                    		\
+#define SvPTR(var, arg, type, class, nullok)                   			\
   if (!SvOK (arg))								\
     {										\
-      if (!nullok)								\
+      if (nullok != 1)								\
         croak (# var " must be a " # class " object, not undef");		\
 										\
       (var) = 0;								\
@@ -936,7 +942,7 @@ static void atfork_child (void)
     {                                                           		\
       IV tmp = SvIV ((SV*) SvRV (arg));                         		\
       (var) = INT2PTR (type, tmp);                              		\
-      if (!var)									\
+      if (!var && nullok != 2)									\
         croak (# var " is not a valid " # class " object anymore");		\
     }                                                           		\
   else                                                          		\
@@ -1713,7 +1719,7 @@ db_sequence_remove (DB_SEQUENCE *seq, DB_TXN_ornull *txnid = 0, U32 flags = 0, S
 MODULE = BDB		PACKAGE = BDB::Env
 
 void
-DESTROY (DB_ENV_ornull *env)
+DESTROY (DB_ENV_ornuked *env)
 	CODE:
         if (env)
           env->close (env, 0);
@@ -1870,7 +1876,7 @@ txn_begin (DB_ENV *env, DB_TXN_ornull *parent = 0, U32 flags = 0)
 MODULE = BDB		PACKAGE = BDB::Db
 
 void
-DESTROY (DB_ornull *db)
+DESTROY (DB_ornuked *db)
 	CODE:
         if (db)
           {
@@ -1975,7 +1981,7 @@ sequence (DB *db, U32 flags = 0)
 MODULE = BDB		PACKAGE = BDB::Txn
 
 void
-DESTROY (DB_TXN_ornull *txn)
+DESTROY (DB_TXN_ornuked *txn)
 	CODE:
         if (txn)
           txn->abort (txn);
@@ -1996,7 +2002,7 @@ int failed (DB_TXN *txn)
 MODULE = BDB		PACKAGE = BDB::Cursor
 
 void
-DESTROY (DBC_ornull *dbc)
+DESTROY (DBC_ornuked *dbc)
 	CODE:
         if (dbc)
           dbc->c_close (dbc);
@@ -2012,7 +2018,7 @@ int set_priority (DBC *dbc, int priority)
 MODULE = BDB		PACKAGE = BDB::Sequence
 
 void
-DESTROY (DB_SEQUENCE_ornull *seq)
+DESTROY (DB_SEQUENCE_ornuked *seq)
 	CODE:
         if (seq)
           seq->close (seq, 0);

@@ -1,13 +1,18 @@
-DB_ENV *	DB_ENV
-DB_ENV_ornull *	DB_ENV_ornull
-DB_TXN *	DB_TXN
-DB_TXN_ornull *	DB_TXN_ornull
-DB *		DB
-DB_ornull *	DB_ornull
-DBC *		DBC
-DBC_ornull *	DBC_ornull
-DB_SEQUENCE *   DB_SEQUENCE
-DB_SEQUENCE_ornull *   DB_SEQUENCE_ornull
+DB_ENV *		DB_ENV
+DB_ENV_ornull *		DB_ENV_ornull
+DB_ENV_ornuked *	DB_ENV_ornuked
+DB_TXN *		DB_TXN
+DB_TXN_ornull *		DB_TXN_ornull
+DB_TXN_ornuked *	DB_TXN_ornuked
+DB *			DB
+DB_ornull *		DB_ornull
+DB_ornuked *		DB_ornuked
+DBC *			DBC
+DBC_ornull *		DBC_ornull
+DBC_ornuked *		DBC_ornuked
+DB_SEQUENCE *  		DB_SEQUENCE
+DB_SEQUENCE_ornull *	DB_SEQUENCE_ornull
+DB_SEQUENCE_ornuked *	DB_SEQUENCE_ornuked
 
 SV8 *		T_SV8
 octetstring	OCTETS
@@ -42,6 +47,7 @@ DB
 DB_SEQUENCE
         SvPTR ($var, $arg, DB_SEQUENCE *, BDB::Sequence, 0);
 
+
 DB_ENV_ornull
         SvPTR ($var, $arg, DB_ENV *, BDB::Env, 1);
 
@@ -56,6 +62,22 @@ DB_ornull
 
 DB_SEQUENCE_ornull
         SvPTR ($var, $arg, DB_SEQUENCE *, BDB::Sequence, 1);
+
+
+DB_ENV_ornuked
+        SvPTR ($var, $arg, DB_ENV *, BDB::Env, 2);
+
+DB_TXN_ornuked
+        SvPTR ($var, $arg, DB_TXN *, BDB::Txn, 2);
+
+DBC_ornuked
+        SvPTR ($var, $arg, DBC *, BDB::Cursor, 2);
+
+DB_ornuked
+        SvPTR ($var, $arg, DB *, BDB::Db, 2);
+
+DB_SEQUENCE_ornuked
+        SvPTR ($var, $arg, DB_SEQUENCE *, BDB::Sequence, 2);
 
 
 OUTPUT

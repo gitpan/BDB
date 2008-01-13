@@ -1,5 +1,9 @@
 Revision history for perl module BDB.
 
+1.43 Sun Jan 13 11:52:49 CET 2008
+	- differentiate between nuked and undef objects, so as to
+          not throw an exception when destroying closed handles.
+
 1.42 Tue Dec 25 15:22:50 CET 2007
 	- do not automatically call set_thread_count.
 
