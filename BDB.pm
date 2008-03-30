@@ -112,7 +112,7 @@ use strict 'vars';
 use base 'Exporter';
 
 BEGIN {
-   our $VERSION = '1.44';
+   our $VERSION = '1.45';
 
    our @BDB_REQ = qw(
       db_env_open db_env_close db_env_txn_checkpoint db_env_lock_detect
@@ -136,11 +136,14 @@ BEGIN {
    XSLoader::load ("BDB", $VERSION);
 }
 
-=head2 FILENAMES/DATABASE NAMES
+=head2 WIN32 FILENAMES/DATABASE NAME MESS
 
-The BDB expects "binary" filenames (octet strings) for pathnames on POSIX
-systems, and "unicode" filenames (strings with characters potentially
->255) on Win32 (expecting a Unicode win32 build - win32 is a total mess).
+Perl on Win32 supports only ASCII filenames (the reason is that it abuses
+an internal flag to store wether a filename is Unicode or ANSI, but that
+flag is used for somethign else in the perl core, so there is no way to
+detect wether a filename is ANSI or Unicode-encoded). The BDB module
+tries to work around this issue by assuming that the filename is an ANSI
+filename and BDB was built for unicode support.
 
 =head2 BERKELEYDB FUNCTIONS
 

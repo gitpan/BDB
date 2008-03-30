@@ -66,15 +66,31 @@ static SV *prepare_cb;
 static char *
 get_bdb_filename (SV *sv)
 {
-  return !SvOK (sv)
-            ? 0
-            :
-#if WIN32
-              SvPVutf8_nolen (sv)
+  if (!SvOK (sv))
+    return 0;
+
+#if _WIN32
+  /* win32 madness + win32 perl absolutely brokenness make for horrible hacks */
+  {
+    STRLEN len;
+    char *src = SvPVbyte (sv, len);
+    SV *t1 = sv_newmortal ();
+    SV *t2 = sv_newmortal ();
+
+    sv_upgrade (t1, SVt_PV); SvPOK_only (t1); SvGROW (t1, len * 16 + 1);
+    sv_upgrade (t2, SVt_PV); SvPOK_only (t2); SvGROW (t2, len * 16 + 1);
+
+    len = MultiByteToWideChar (CP_ACP, 0, src, len, (WCHAR *)SvPVX (t1), SvLEN (t1) / sizeof (WCHAR));
+    len = WideCharToMultiByte (CP_UTF8, 0, (WCHAR *)SvPVX (t1), len, SvPVX (t2), SvLEN (t2), 0, 0);
+    SvPOK_only (t2);
+    SvPVX (t2)[len] = 0;
+    SvCUR_set (t2, len);
+
+    return SvPVX (t2);
+  }
 #else
-              SvPVbyte_nolen (sv)
+  return SvPVbyte_nolen (sv);
 #endif
-         ;
 }
 
 static void
