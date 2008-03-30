@@ -89,16 +89,22 @@ REQUEST ANATOMY AND LIFETIME
         the actual aio request is severed and calling its methods will
         either do nothing or result in a runtime error).
 
+  FILENAMES/DATABASE NAMES
+    The BDB expects "binary" filenames (octet strings) for pathnames on
+    POSIX systems, and "unicode" filenames (strings with characters
+    potentially >255) on Win32 (expecting a Unicode win32 build - win32 is a
+    total mess).
+
   BERKELEYDB FUNCTIONS
     All of these are functions. The create functions simply return a new
-    object and never block. All the remaining functions all take an optional
+    object and never block. All the remaining functions take an optional
     callback as last argument. If it is missing, then the function will be
     executed synchronously. In both cases, $! will reflect the return value
     of the function.
 
     BDB functions that cannot block (mostly functions that manipulate
     settings) are method calls on the relevant objects, so the rule of thumb
-    is: if its a method, its not blocking, if its a function, it takes a
+    is: if it's a method, it's not blocking, if it's a function, it takes a
     callback as last argument.
 
     In the following, $int signifies an integer return value, "octetstring"
@@ -363,8 +369,8 @@ REQUEST ANATOMY AND LIFETIME
 
    Example:
        my $seq = $db->sequence;
-      
-       db_sequence_open $seq, undef, "seq", BDB::CREATE;
+          
+   db_sequence_open $seq, undef, "seq", BDB::CREATE;
        db_sequence_get $seq, undef, 1, my $value;
 
   SUPPORT FUNCTIONS
@@ -372,6 +378,10 @@ REQUEST ANATOMY AND LIFETIME
     $msg = BDB::strerror [$errno]
         Returns the string corresponding to the given errno value. If no
         argument is given, use $!.
+
+        Note that the BDB module also patches the $! variable directly, so
+        you should be able to get a bdb error string by simply stringifying
+        $!.
 
     $fileno = BDB::poll_fileno
         Return the *request result pipe file descriptor*. This filehandle

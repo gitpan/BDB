@@ -49,7 +49,7 @@ typedef DB          DB_ornuked;
 typedef DB_SEQUENCE DB_SEQUENCE_ornuked;
 
 typedef SV SV8; /* byte-sv, used for argument-checking */
-typedef char *octetstring;
+typedef char *bdb_filename;
 
 static SV *prepare_cb;
 
@@ -62,6 +62,20 @@ static SV *prepare_cb;
 # define c_pget  pget  
 # define c_put   put   
 #endif
+
+static char *
+get_bdb_filename (SV *sv)
+{
+  return !SvOK (sv)
+            ? 0
+            :
+#if WIN32
+              SvPVutf8_nolen (sv)
+#else
+              SvPVbyte_nolen (sv)
+#endif
+         ;
+}
 
 static void
 debug_errcall (const DB_ENV *dbenv, const char *errpfx, const char *msg)
@@ -207,7 +221,7 @@ static cond_t  reqwait = X_COND_INIT;
 
 #if WORDACCESS_UNSAFE
 
-static unsigned int get_nready ()
+static unsigned int get_nready (void)
 {
   unsigned int retval;
 
@@ -218,7 +232,7 @@ static unsigned int get_nready ()
   return retval;
 }
 
-static unsigned int get_npending ()
+static unsigned int get_npending (void)
 {
   unsigned int retval;
 
@@ -229,7 +243,7 @@ static unsigned int get_npending ()
   return retval;
 }
 
-static unsigned int get_nthreads ()
+static unsigned int get_nthreads (void)
 {
   unsigned int retval;
 
@@ -302,7 +316,7 @@ bdb_req reqq_shift (reqq *q)
   abort ();
 }
 
-static int poll_cb ();
+static int poll_cb (void);
 static void req_free (bdb_req req);
 static void req_cancel (bdb_req req);
 
@@ -393,7 +407,7 @@ static void req_free (bdb_req req)
 #endif
 
 static void
-create_respipe ()
+create_respipe (void)
 {
 #ifdef _WIN32
   int arg; /* argg */
@@ -457,7 +471,7 @@ static void start_thread (void)
   X_UNLOCK (wrklock);
 }
 
-static void maybe_start_thread ()
+static void maybe_start_thread (void)
 {
   if (get_nthreads () >= wanted)
     return;
@@ -552,7 +566,7 @@ static void max_parallel (int nthreads)
     end_thread ();
 }
 
-static void poll_wait ()
+static void poll_wait (void)
 {
   fd_set rfd;
 
@@ -575,7 +589,7 @@ static void poll_wait ()
     }
 }
 
-static int poll_cb ()
+static int poll_cb (void)
 {
   dSP;
   int count = 0;
@@ -956,6 +970,45 @@ ptr_nuke (SV *sv)
   sv_setiv (SvRV (sv), 0);
 }
 
+static int
+errno_get (pTHX_ SV *sv, MAGIC *mg)
+{
+  if (*mg->mg_ptr == '!') // should always be the case
+    if (-30999 <= errno && errno <= -30800)
+      {
+        sv_setnv (sv, (NV)errno);
+        sv_setpv (sv, db_strerror (errno));
+        SvNOK_on (sv); /* what a wonderful hack! */
+                       // ^^^ copied from perl sources
+        return 0;
+      }
+
+  return PL_vtbl_sv.svt_get (aTHX_ sv, mg);
+}
+
+static MGVTBL vtbl_errno;
+
+// this wonderful hack :( patches perl's $! variable to support our errno values
+static void
+patch_errno (void)
+{
+  SV *sv;
+  MAGIC *mg;
+
+  if (!(sv = get_sv ("!", 1)))
+    return;
+
+  if (!(mg = mg_find (sv, PERL_MAGIC_sv)))
+    return;
+
+  if (mg->mg_virtual != &PL_vtbl_sv)
+    return;
+
+  vtbl_errno = PL_vtbl_sv;
+  vtbl_errno.svt_get = errno_get;
+  mg->mg_virtual = &vtbl_errno;
+}
+
 MODULE = BDB                PACKAGE = BDB
 
 PROTOTYPES: ENABLE
@@ -1161,6 +1214,7 @@ BOOT:
 
         X_COND_CHECK  (reqwait);
 #endif
+        patch_errno ();
 }
 
 void
@@ -1328,7 +1382,7 @@ db_env_create (U32 env_flags = 0)
 	RETVAL
 
 void
-db_env_open (DB_ENV *env, octetstring db_home, U32 open_flags, int mode, SV *callback = &PL_sv_undef)
+db_env_open (DB_ENV *env, bdb_filename db_home, U32 open_flags, int mode, SV *callback = &PL_sv_undef)
 	CODE:
 {
         dREQ (REQ_ENV_OPEN);
@@ -1409,7 +1463,7 @@ db_create (DB_ENV *env = 0, U32 flags = 0)
 	RETVAL
 
 void
-db_open (DB *db, DB_TXN_ornull *txnid, octetstring file, octetstring database, int type, U32 flags, int mode, SV *callback = &PL_sv_undef)
+db_open (DB *db, DB_TXN_ornull *txnid, bdb_filename file, bdb_filename database, int type, U32 flags, int mode, SV *callback = &PL_sv_undef)
 	CODE:
 {
         dREQ (REQ_DB_OPEN);
@@ -1459,7 +1513,7 @@ db_sync (DB *db, U32 flags = 0, SV *callback = &PL_sv_undef)
 }
 
 void
-db_upgrade (DB *db, octetstring file, U32 flags = 0, SV *callback = &PL_sv_undef)
+db_upgrade (DB *db, bdb_filename file, U32 flags = 0, SV *callback = &PL_sv_undef)
 	CODE:
 {
         dREQ (REQ_DB_SYNC);
@@ -2046,4 +2100,5 @@ int set_range (DB_SEQUENCE *seq, db_seq_t min, db_seq_t max)
         RETVAL = seq->set_range (seq, min, max);
 	OUTPUT:
         RETVAL
+
 

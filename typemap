@@ -15,7 +15,7 @@ DB_SEQUENCE_ornull *	DB_SEQUENCE_ornull
 DB_SEQUENCE_ornuked *	DB_SEQUENCE_ornuked
 
 SV8 *		T_SV8
-octetstring	OCTETS
+bdb_filename	BDB_FILENAME
 db_seq_t	DB_SEQ
 
 
@@ -26,8 +26,8 @@ T_SV8
         if (SvPOKp ($var) && !sv_utf8_downgrade ($var, 1))
           croak (\"\\\"%s\\\" argument must be byte/octet-encoded\", \"$var\")
 
-OCTETS
-        $var = SvOK ($arg) ? SvPVbyte_nolen ($arg) : 0;
+BDB_FILENAME
+        ($var) = get_bdb_filename ($arg);
 
 DB_SEQ
 	$var = sizeof (IV) > 4 ? SvIV ($arg) : SvNV ($arg);

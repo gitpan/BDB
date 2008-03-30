@@ -112,7 +112,7 @@ use strict 'vars';
 use base 'Exporter';
 
 BEGIN {
-   our $VERSION = '1.43';
+   our $VERSION = '1.44';
 
    our @BDB_REQ = qw(
       db_env_open db_env_close db_env_txn_checkpoint db_env_lock_detect
@@ -136,17 +136,23 @@ BEGIN {
    XSLoader::load ("BDB", $VERSION);
 }
 
+=head2 FILENAMES/DATABASE NAMES
+
+The BDB expects "binary" filenames (octet strings) for pathnames on POSIX
+systems, and "unicode" filenames (strings with characters potentially
+>255) on Win32 (expecting a Unicode win32 build - win32 is a total mess).
+
 =head2 BERKELEYDB FUNCTIONS
 
 All of these are functions. The create functions simply return a new
-object and never block. All the remaining functions all take an optional
+object and never block. All the remaining functions take an optional
 callback as last argument. If it is missing, then the function will be
 executed synchronously. In both cases, C<$!> will reflect the return value
 of the function.
 
 BDB functions that cannot block (mostly functions that manipulate
 settings) are method calls on the relevant objects, so the rule of thumb
-is: if its a method, its not blocking, if its a function, it takes a
+is: if it's a method, it's not blocking, if it's a function, it takes a
 callback as last argument.
 
 In the following, C<$int> signifies an integer return value,
@@ -441,6 +447,9 @@ Methods available on DB_SEQUENCE/$seq handles:
 
 Returns the string corresponding to the given errno value. If no argument
 is given, use C<$!>.
+
+Note that the BDB module also patches the C<$!> variable directly, so you
+should be able to get a bdb error string by simply stringifying C<$!>.
 
 =item $fileno = BDB::poll_fileno
 

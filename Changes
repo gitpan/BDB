@@ -1,5 +1,12 @@
 Revision history for perl module BDB.
 
+1.44 Sun Mar 30 08:28:11 CEST 2008
+	- encode filenames as utf-8 (for bdb/win32)
+          or binary (everywhere else).
+	- patch $! to support stringification of BDB errno values
+          (utter hack, this should be pluggable :).
+        - fix prototypes of (void) functions.
+
 1.43 Sun Jan 13 11:52:49 CET 2008
 	- differentiate between nuked and undef objects, so as to
           not throw an exception when destroying closed handles.
