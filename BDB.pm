@@ -29,9 +29,8 @@ BDB - Asynchronous Berkeley DB access
  # when you also use Coro, management is easy:
  use Coro::BDB;
 
- # automatic result processing with AnyEvent:
- our $FH; open $FH, "<&=" . BDB::poll_fileno;
- our $WATCHER = AnyEvent->io (fh => $FH, poll => 'r', cb => \&BDB::poll_cb);
+ # automatic event loop intergration with AnyEvent:
+ use AnyEvent::BDB;
 
  # automatic result processing with EV:
  my $WATCHER = EV::io BDB::poll_fileno, EV::READ, \&BDB::poll_cb;
@@ -112,7 +111,7 @@ use strict 'vars';
 use base 'Exporter';
 
 BEGIN {
-   our $VERSION = '1.45';
+   our $VERSION = '1.5';
 
    our @BDB_REQ = qw(
       db_env_open db_env_close db_env_txn_checkpoint db_env_lock_detect
@@ -724,7 +723,8 @@ Known bugs will be fixed in the next release, except:
 
 =head1 SEE ALSO
 
-L<Coro::BDB>, L<IO::AIO>.
+L<AnyEvent::BDB> (event loop integration), L<Coro::BDB> (more natural
+syntax), L<IO::AIO> (nice to have).
 
 =head1 AUTHOR
 

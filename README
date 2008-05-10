@@ -27,9 +27,8 @@ SYNOPSIS
      # when you also use Coro, management is easy:
      use Coro::BDB;
 
-     # automatic result processing with AnyEvent:
-     our $FH; open $FH, "<&=" . BDB::poll_fileno;
-     our $WATCHER = AnyEvent->io (fh => $FH, poll => 'r', cb => \&BDB::poll_cb);
+     # automatic event loop intergration with AnyEvent:
+     use AnyEvent::BDB;
 
      # automatic result processing with EV:
      my $WATCHER = EV::io BDB::poll_fileno, EV::READ, \&BDB::poll_cb;
@@ -612,7 +611,8 @@ KNOWN BUGS
        above.
 
 SEE ALSO
-    Coro::BDB, IO::AIO.
+    AnyEvent::BDB (event loop integration), Coro::BDB (more natural syntax),
+    IO::AIO (nice to have).
 
 AUTHOR
      Marc Lehmann <schmorp@schmorp.de>

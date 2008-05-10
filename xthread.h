@@ -77,9 +77,17 @@ thread_create (thread_t *tid, void *(*proc)(void *), void *arg)
 /* just in case */
 #define _REENTRANT 1
 
+#if __solaris
+/* try to bribe solaris headers into providing a current pthread API
+ * despite perl being configured for an older version.
+ */
+# define __EXTENSIONS__ 1
+#endif
+
 #include <unistd.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <limits.h>
 #include <pthread.h>
 
 typedef pthread_mutex_t mutex_t;
@@ -110,6 +118,8 @@ thread_create (thread_t *tid, void *(*proc)(void *), void *arg)
 
   pthread_attr_init (&attr);
   pthread_attr_setdetachstate (&attr, PTHREAD_CREATE_DETACHED);
+  pthread_attr_setstacksize (&attr, PTHREAD_STACK_MIN < sizeof (long) * 4096
+                                    ? sizeof (long) * 4096 : PTHREAD_STACK_MIN);
 #ifdef PTHREAD_SCOPE_PROCESS
   pthread_attr_setscope (&attr, PTHREAD_SCOPE_PROCESS);
 #endif

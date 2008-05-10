@@ -1,5 +1,15 @@
 Revision history for perl module BDB.
 
+1.5  Sat May 10 22:22:42 CEST 2008
+	- port to solaris perls configured for old posix
+          (analysed by Jost Krieger).
+        - do our own stack memory management for threads - linux
+          allocates outrageous amounts of VM (not so bad unless you
+          use mlockall...), which severely limits the number of threads
+          on 32-bit arches: stack size is the larger of PTHREAD_STACK_MIN
+          and 4096 * sizeof (long) (usually this is 16..64k).
+	- support AnyEvent::BDB.
+
 1.45 Sun Mar 30 10:01:00 CEST 2008
 	- work around win32 perl's broken filehandles
           (this cannot work in all cases, so watch out).

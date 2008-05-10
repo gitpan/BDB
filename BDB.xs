@@ -183,6 +183,8 @@ enum {
 
 #define AIO_TICKS ((1000000 + 1023) >> 10)
 
+static SV *on_next_submit;
+
 static unsigned int max_poll_time = 0;
 static unsigned int max_poll_reqs = 0;
 
@@ -502,6 +504,18 @@ static void maybe_start_thread (void)
 static void req_send (bdb_req req)
 {
   SV *wait_callback = 0;
+
+  if (on_next_submit)
+    {
+      dSP;
+      SV *cb = sv_2mortal (on_next_submit);
+
+      on_next_submit = 0;
+
+      PUSHMARK (SP);
+      PUTBACK;
+      call_sv (cb, G_DISCARD | G_EVAL);
+    }
 
   // synthesize callback if none given
   if (!SvOK (req->callback))
@@ -1379,6 +1393,11 @@ strerror (int errorno = errno)
         RETVAL = db_strerror (errorno);
 	OUTPUT:
         RETVAL
+
+void _on_next_submit (SV *cb)
+        CODE:
+        SvREFCNT_dec (on_next_submit);
+        on_next_submit = SvOK (cb) ? newSVsv (cb) : 0;
 
 DB_ENV *
 db_env_create (U32 env_flags = 0)
