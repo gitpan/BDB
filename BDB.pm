@@ -111,11 +111,11 @@ use strict 'vars';
 use base 'Exporter';
 
 BEGIN {
-   our $VERSION = '1.5';
+   our $VERSION = '1.6';
 
    our @BDB_REQ = qw(
       db_env_open db_env_close db_env_txn_checkpoint db_env_lock_detect
-      db_env_memp_sync db_env_memp_trickle
+      db_env_memp_sync db_env_memp_trickle db_env_dbrename db_env_dbremove
       db_open db_close db_compact db_sync db_upgrade
       db_put db_get db_pget db_del db_key_range
       db_txn_commit db_txn_abort db_txn_finish
@@ -158,9 +158,9 @@ is: if it's a method, it's not blocking, if it's a function, it takes a
 callback as last argument.
 
 In the following, C<$int> signifies an integer return value,
-C<octetstring> is a "binary string" (i.e. a perl string with no character
-indices >255), C<U32> is an unsigned 32 bit integer, C<int> is some
-integer, C<NV> is a floating point value.
+C<bdb_filename> is a "filename" (octets on unix, madness on windows),
+C<U32> is an unsigned 32 bit integer, C<int> is some integer, C<NV> is a
+floating point value.
 
 The C<SV *> types are generic perl scalars (for input and output of data
 values), and the C<SV *callback> is the optional callback function to call
@@ -178,7 +178,7 @@ Functions in the BDB namespace, exported by default:
    $env = db_env_create (U32 env_flags = 0)
       flags: RPCCLIENT
 
-   db_env_open (DB_ENV *env, octetstring db_home, U32 open_flags, int mode, SV *callback = &PL_sv_undef)
+   db_env_open (DB_ENV *env, bdb_filename db_home, U32 open_flags, int mode, SV *callback = &PL_sv_undef)
       open_flags: INIT_CDB INIT_LOCK INIT_LOG INIT_MPOOL INIT_REP INIT_TXN RECOVER RECOVER_FATAL USE_ENVIRON USE_ENVIRON_ROOT CREATE LOCKDOWN PRIVATE REGISTER SYSTEM_MEM
    db_env_close (DB_ENV *env, U32 flags = 0, SV *callback = &PL_sv_undef)
    db_env_txn_checkpoint (DB_ENV *env, U32 kbyte = 0, U32 min = 0, U32 flags = 0, SV *callback = &PL_sv_undef)
@@ -187,15 +187,17 @@ Functions in the BDB namespace, exported by default:
       atype: LOCK_DEFAULT LOCK_EXPIRE LOCK_MAXLOCKS LOCK_MAXWRITE LOCK_MINLOCKS LOCK_MINWRITE LOCK_OLDEST LOCK_RANDOM LOCK_YOUNGEST
    db_env_memp_sync (DB_ENV *env, SV *dummy = 0, SV *callback = &PL_sv_undef)
    db_env_memp_trickle (DB_ENV *env, int percent, SV *dummy = 0, SV *callback = &PL_sv_undef)
+   db_env_dbremove (DB_ENV *env, DB_TXN_ornull *txnid, bdb_filename file, bdb_filename database, U32 flags = 0, SV *callback = &PL_sv_undef)
+   db_env_dbrename (DB_ENV *env, DB_TXN_ornull *txnid, bdb_filename file, bdb_filename database, bdb_filename newname, U32 flags = 0, SV *callback = &PL_sv_undef)
 
    $db = db_create (DB_ENV *env = 0, U32 flags = 0)
       flags: XA_CREATE
 
-   db_open (DB *db, DB_TXN_ornull *txnid, octetstring file, octetstring database, int type, U32 flags, int mode, SV *callback = &PL_sv_undef)
+   db_open (DB *db, DB_TXN_ornull *txnid, bdb_filename file, bdb_filename database, int type, U32 flags, int mode, SV *callback = &PL_sv_undef)
       flags: AUTO_COMMIT CREATE EXCL MULTIVERSION NOMMAP RDONLY READ_UNCOMMITTED THREAD TRUNCATE
    db_close (DB *db, U32 flags = 0, SV *callback = &PL_sv_undef)
       flags: DB_NOSYNC
-   db_upgrade (DB *db, octetstring file, U32 flags = 0, SV *callback = &PL_sv_undef)
+   db_upgrade (DB *db, bdb_filename file, U32 flags = 0, SV *callback = &PL_sv_undef)
    db_compact (DB *db, DB_TXN_ornull *txn = 0, SV *start = 0, SV *stop = 0, SV *unused1 = 0, U32 flags = DB_FREE_SPACE, SV *unused2 = 0, SV *callback = &PL_sv_undef)
       flags: FREELIST_ONLY FREE_SPACE
    db_sync (DB *db, U32 flags = 0, SV *callback = &PL_sv_undef)
@@ -278,7 +280,9 @@ Methods available on DB_ENV/$env handles:
    $int = $env->set_lg_dir (const char *dir)
    $int = $env->set_shm_key (long shm_key)
    $int = $env->set_cachesize (U32 gbytes, U32 bytes, int ncache = 0)
-   $int = $env->set_flags (U32 flags, int onoff)
+   $int = $env->set_flags (U32 flags, int onoff = 1)
+   $int = $env->log_set_config (U32 flags, int onoff = 1) [v4.7]
+   $int = $env->set_intermediate_dir_mode (const char *modestring) [v4.7]
    $env->set_errfile (FILE *errfile = 0)
    $env->set_msgfile (FILE *msgfile = 0)
    $int = $env->set_verbose (U32 which, int onoff = 1)
@@ -538,6 +542,65 @@ Strictly equivalent to:
 
 =back
 
+=head3 VERSION CHECKING
+
+BerkeleyDB comes in various versions, many of them have minor
+incompatibilities. This means that traditional "at least version x.x"
+checks are often not sufficient.
+
+Example: set the log_autoremove option in a way compatible with <v.47 and
+v4.7. Note the use of & on the constants to avoid triggering a compiletime
+bug when the symbol isn't available.
+
+   $DB_ENV->set_flags      (&BDB::LOG_AUTOREMOVE ) if BDB::VERSION v0, v4.7;
+   $DB_ENV->log_set_config (&BDB::LOG_AUTO_REMOVE) if BDB::VERSION v4.7;
+
+=over 4
+
+=item BDB::VERSION
+
+The C<BDB::VERSION> function, when called without arguments, returns the
+Berkeley DB version as a v-string (usually with 3 components). You should
+use C<lt> and C<ge> operators exclusively to make comparisons.
+
+Example: check for at least version 4.7.
+
+   BDB::VERSION ge v4.7 or die;
+
+=item BDB::VERSION min-version
+
+Returns true if the BDB version is at least the given version (specified
+as a v-string), false otherwise.
+
+Example: check for at least version 4.5.
+
+   BDB::VERSION v4.7 or die;
+
+=item BDB::VERSION min-version, max-version
+
+Returns true of the BDB version is at least version C<min-version> (specify C<undef> or C<v0> for any minimum version)
+and less then C<max-version>.
+
+Example: check wether version is strictly less then v4.7.
+
+   BDB::VERSION v0, v4.7
+      or die "version 4.7 is not yet supported";
+
+=back
+
+=cut
+
+sub VERSION {
+   if (@_ > 0) {
+      return undef if VERSION_v lt $_[0];
+      if (@_ > 1) {
+         return undef if VERSION_v ge $_[1];
+      }
+   }
+
+   VERSION_v
+}
+
 =head3 CONTROLLING THE NUMBER OF THREADS
 
 =over 4
@@ -613,8 +676,14 @@ as a stop gap to shield against fatal memory overflow (with large values).
 
 Sets a callback that is called whenever a request is created without an
 explicit callback. It has to return two code references. The first is used
-as the request callback, and the second is called to wait until the first
-callback has been called. The default implementation works like this:
+as the request callback (it should save the return status), and the second
+is called to wait until the first callback has been called (it must set
+C<$!> to the return status).
+
+This mechanism can be used to include BDB into other event mechanisms,
+such as L<AnyEvent::BDB> or L<Coro::BDB>.
+
+The default implementation works like this:
 
    sub {
       my $status;
@@ -623,6 +692,10 @@ callback has been called. The default implementation works like this:
          sub { BDB::poll while !defined $status; $! = $status },
       )
    }
+
+It simply blocks the process till the request has finished and then sets
+C<$!> to the return value. This means that if you don't use a callback,
+BDB will simply fall back to synchronous operations.
 
 =back
 

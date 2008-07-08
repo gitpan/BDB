@@ -1,5 +1,13 @@
 Revision history for perl module BDB.
 
+1.6  Tue Jul  8 10:34:58 CEST 2008
+	- add new BDB::VERSION function for easy version checks.
+	- work around broken bsd headers once more.
+        - support for berkeley db 4.7 added.
+        - add support for log_set_config and it's constants,
+          and set_intermediate_dir_mode.
+        - add db_env_dbrename and db_env_dbremove.
+
 1.5  Sat May 10 22:22:42 CEST 2008
 	- port to solaris perls configured for old posix
           (analysed by Jost Krieger).

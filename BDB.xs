@@ -139,7 +139,7 @@ dbt_to_sv (SV *sv, DBT *dbt)
 enum {
   REQ_QUIT,
   REQ_ENV_OPEN, REQ_ENV_CLOSE, REQ_ENV_TXN_CHECKPOINT, REQ_ENV_LOCK_DETECT,
-  REQ_ENV_MEMP_SYNC, REQ_ENV_MEMP_TRICKLE,
+  REQ_ENV_MEMP_SYNC, REQ_ENV_MEMP_TRICKLE, REQ_ENV_DBREMOVE, REQ_ENV_DBRENAME,
   REQ_DB_OPEN, REQ_DB_CLOSE, REQ_DB_COMPACT, REQ_DB_SYNC, REQ_DB_UPGRADE,
   REQ_DB_PUT, REQ_DB_GET, REQ_DB_PGET, REQ_DB_DEL, REQ_DB_KEY_RANGE,
   REQ_TXN_COMMIT, REQ_TXN_ABORT, REQ_TXN_FINISH,
@@ -161,7 +161,7 @@ typedef struct bdb_cb
   UV uv1;
   int int1, int2;
   U32 uint1, uint2;
-  char *buf1, *buf2;
+  char *buf1, *buf2, *buf3;
   SV *sv1, *sv2, *sv3;
 
   DBT dbt1, dbt2, dbt3;
@@ -415,6 +415,7 @@ static void req_free (bdb_req req)
 {
   free (req->buf1);
   free (req->buf2);
+  free (req->buf3);
   Safefree (req);
 }
 
@@ -774,6 +775,14 @@ X_THREAD_PROC (bdb_proc)
             req->result = req->env->memp_trickle (req->env, req->int1, &req->int2);
             break;
 
+          case REQ_ENV_DBREMOVE:
+            req->result = req->env->dbremove (req->env, req->txn, req->buf1, req->buf2, req->uint1);
+            break;
+
+          case REQ_ENV_DBRENAME:
+            req->result = req->env->dbrename (req->env, req->txn, req->buf1, req->buf2, req->buf3, req->uint1);
+            break;
+
           case REQ_DB_OPEN:
             req->result = req->db->open (req->db, req->txn, req->buf1, req->buf2, req->int1, req->uint1, req->int2);
             break;
@@ -1073,11 +1082,7 @@ BOOT:
           const_iv (AUTO_COMMIT)
           const_iv (CDB_ALLDB)
           const_iv (DIRECT_DB)
-          const_iv (DIRECT_LOG)
           const_iv (DSYNC_DB)
-          const_iv (DSYNC_LOG)
-          const_iv (LOG_AUTOREMOVE)
-          const_iv (LOG_INMEMORY)
           const_iv (NOLOCKING)
           const_iv (NOMMAP)
           const_iv (NOPANIC)
@@ -1226,24 +1231,35 @@ BOOT:
           const_iv (PRIORITY_HIGH)
           const_iv (PRIORITY_VERY_HIGH)
 #endif
+#if DB_VERSION_MINOR >= 7
+          const_iv (LOG_DIRECT)
+          const_iv (LOG_DSYNC)
+          const_iv (LOG_AUTO_REMOVE)
+          const_iv (LOG_IN_MEMORY)
+          const_iv (LOG_ZERO)
+#else
+          const_iv (DIRECT_LOG)
+          const_iv (DSYNC_LOG)
+          const_iv (LOG_AUTOREMOVE)
+          const_iv (LOG_INMEMORY)
+#endif
         };
 
         for (civ = const_iv + sizeof (const_iv) / sizeof (const_iv [0]); civ-- > const_iv; )
           newCONSTSUB (stash, (char *)civ->name, newSViv (civ->iv));
 
-        newCONSTSUB (stash, "VERSION", newSVnv (DB_VERSION_MAJOR + DB_VERSION_MINOR * .1));
+        {
+          /* we currently only allow version, minor-version and patchlevel to go up to 255 */
+          char vstring[3] = { DB_VERSION_MAJOR, DB_VERSION_MINOR, DB_VERSION_PATCH };
+
+          newCONSTSUB (stash, "VERSION_v", newSVpvn (vstring, 3));
+        }
+
         newCONSTSUB (stash, "VERSION_STRING", newSVpv (DB_VERSION_STRING, 0));
 
         create_respipe ();
 
         X_THREAD_ATFORK (atfork_prepare, atfork_parent, atfork_child);
-#ifdef _WIN32
-        X_MUTEX_CHECK (wrklock);
-        X_MUTEX_CHECK (reslock);
-        X_MUTEX_CHECK (reqlock);
-
-        X_COND_CHECK  (reqwait);
-#endif
         patch_errno ();
 }
 
@@ -1482,6 +1498,30 @@ db_env_memp_trickle (DB_ENV *env, int percent, SV *dummy = 0, SV *callback = &PL
         REQ_SEND;
 }
 
+void
+db_env_dbremove (DB_ENV *env, DB_TXN_ornull *txnid, bdb_filename file, bdb_filename database, U32 flags = 0, SV *callback = &PL_sv_undef)
+	CODE:
+{
+	dREQ (REQ_ENV_DBREMOVE);
+        req->env   = env;
+        req->buf1  = strdup_ornull (file);
+        req->buf2  = strdup_ornull (database);
+        req->uint1 = flags;
+        REQ_SEND;
+}
+
+void
+db_env_dbrename (DB_ENV *env, DB_TXN_ornull *txnid, bdb_filename file, bdb_filename database, bdb_filename newname, U32 flags = 0, SV *callback = &PL_sv_undef)
+	CODE:
+{
+	dREQ (REQ_ENV_DBRENAME);
+        req->env   = env;
+        req->buf1  = strdup_ornull (file);
+        req->buf2  = strdup_ornull (database);
+        req->buf3  = strdup_ornull (newname);
+        req->uint1 = flags;
+        REQ_SEND;
+}
 
 DB *
 db_create (DB_ENV *env = 0, U32 flags = 0)
@@ -1848,6 +1888,23 @@ int set_flags (DB_ENV *env, U32 flags, int onoff = 1)
         RETVAL = env->set_flags (env, flags, onoff);
 	OUTPUT:
         RETVAL
+
+#if DB_VERSION_MINOR >= 7
+
+int set_intermediate_dir_mode (DB_ENV *env, const char *mode)
+	CODE:
+        RETVAL = env->set_intermediate_dir_mode (env, mode);
+	OUTPUT:
+        RETVAL
+
+int log_set_config (DB_ENV *env, U32 flags, int onoff = 1)
+	CODE:
+        RETVAL = env->log_set_config (env, flags, onoff);
+	OUTPUT:
+        RETVAL
+
+#endif
+
 
 void set_errfile (DB_ENV *env, FILE *errfile = 0)
 	CODE:

@@ -108,10 +108,10 @@ REQUEST ANATOMY AND LIFETIME
     is: if it's a method, it's not blocking, if it's a function, it takes a
     callback as last argument.
 
-    In the following, $int signifies an integer return value, "octetstring"
-    is a "binary string" (i.e. a perl string with no character indices
-    >255), "U32" is an unsigned 32 bit integer, "int" is some integer, "NV"
-    is a floating point value.
+    In the following, $int signifies an integer return value, "bdb_filename"
+    is a "filename" (octets on unix, madness on windows), "U32" is an
+    unsigned 32 bit integer, "int" is some integer, "NV" is a floating point
+    value.
 
     The "SV *" types are generic perl scalars (for input and output of data
     values), and the "SV *callback" is the optional callback function to
@@ -128,7 +128,7 @@ REQUEST ANATOMY AND LIFETIME
        $env = db_env_create (U32 env_flags = 0)
           flags: RPCCLIENT
 
-       db_env_open (DB_ENV *env, octetstring db_home, U32 open_flags, int mode, SV *callback = &PL_sv_undef)
+       db_env_open (DB_ENV *env, bdb_filename db_home, U32 open_flags, int mode, SV *callback = &PL_sv_undef)
           open_flags: INIT_CDB INIT_LOCK INIT_LOG INIT_MPOOL INIT_REP INIT_TXN RECOVER RECOVER_FATAL USE_ENVIRON USE_ENVIRON_ROOT CREATE LOCKDOWN PRIVATE REGISTER SYSTEM_MEM
        db_env_close (DB_ENV *env, U32 flags = 0, SV *callback = &PL_sv_undef)
        db_env_txn_checkpoint (DB_ENV *env, U32 kbyte = 0, U32 min = 0, U32 flags = 0, SV *callback = &PL_sv_undef)
@@ -137,15 +137,17 @@ REQUEST ANATOMY AND LIFETIME
           atype: LOCK_DEFAULT LOCK_EXPIRE LOCK_MAXLOCKS LOCK_MAXWRITE LOCK_MINLOCKS LOCK_MINWRITE LOCK_OLDEST LOCK_RANDOM LOCK_YOUNGEST
        db_env_memp_sync (DB_ENV *env, SV *dummy = 0, SV *callback = &PL_sv_undef)
        db_env_memp_trickle (DB_ENV *env, int percent, SV *dummy = 0, SV *callback = &PL_sv_undef)
+       db_env_dbremove (DB_ENV *env, DB_TXN_ornull *txnid, bdb_filename file, bdb_filename database, U32 flags = 0, SV *callback = &PL_sv_undef)
+       db_env_dbrename (DB_ENV *env, DB_TXN_ornull *txnid, bdb_filename file, bdb_filename database, bdb_filename newname, U32 flags = 0, SV *callback = &PL_sv_undef)
 
        $db = db_create (DB_ENV *env = 0, U32 flags = 0)
           flags: XA_CREATE
 
-       db_open (DB *db, DB_TXN_ornull *txnid, octetstring file, octetstring database, int type, U32 flags, int mode, SV *callback = &PL_sv_undef)
+       db_open (DB *db, DB_TXN_ornull *txnid, bdb_filename file, bdb_filename database, int type, U32 flags, int mode, SV *callback = &PL_sv_undef)
           flags: AUTO_COMMIT CREATE EXCL MULTIVERSION NOMMAP RDONLY READ_UNCOMMITTED THREAD TRUNCATE
        db_close (DB *db, U32 flags = 0, SV *callback = &PL_sv_undef)
           flags: DB_NOSYNC
-       db_upgrade (DB *db, octetstring file, U32 flags = 0, SV *callback = &PL_sv_undef)
+       db_upgrade (DB *db, bdb_filename file, U32 flags = 0, SV *callback = &PL_sv_undef)
        db_compact (DB *db, DB_TXN_ornull *txn = 0, SV *start = 0, SV *stop = 0, SV *unused1 = 0, U32 flags = DB_FREE_SPACE, SV *unused2 = 0, SV *callback = &PL_sv_undef)
           flags: FREELIST_ONLY FREE_SPACE
        db_sync (DB *db, U32 flags = 0, SV *callback = &PL_sv_undef)
@@ -226,7 +228,9 @@ REQUEST ANATOMY AND LIFETIME
        $int = $env->set_lg_dir (const char *dir)
        $int = $env->set_shm_key (long shm_key)
        $int = $env->set_cachesize (U32 gbytes, U32 bytes, int ncache = 0)
-       $int = $env->set_flags (U32 flags, int onoff)
+       $int = $env->set_flags (U32 flags, int onoff = 1)
+       $int = $env->log_set_config (U32 flags, int onoff = 1) [v4.7]
+       $int = $env->set_intermediate_dir_mode (const char *modestring) [v4.7]
        $env->set_errfile (FILE *errfile = 0)
        $env->set_msgfile (FILE *msgfile = 0)
        $int = $env->set_verbose (U32 which, int onoff = 1)
@@ -462,6 +466,46 @@ REQUEST ANATOMY AND LIFETIME
            BDB::poll_wait, BDB::poll_cb
               while BDB::nreqs;
 
+   VERSION CHECKING
+    BerkeleyDB comes in various versions, many of them have minor
+    incompatibilities. This means that traditional "at least version x.x"
+    checks are often not sufficient.
+
+    Example: set the log_autoremove option in a way compatible with <v.47
+    and v4.7. Note the use of & on the constants to avoid triggering a
+    compiletime bug when the symbol isn't available.
+
+       $DB_ENV->set_flags      (&BDB::LOG_AUTOREMOVE ) if BDB::VERSION v0, v4.7;
+       $DB_ENV->log_set_config (&BDB::LOG_AUTO_REMOVE) if BDB::VERSION v4.7;
+
+    BDB::VERSION
+        The "BDB::VERSION" function, when called without arguments, returns
+        the Berkeley DB version as a v-string (usually with 3 components).
+        You should use "lt" and "ge" operators exclusively to make
+        comparisons.
+
+        Example: check for at least version 4.7.
+
+           BDB::VERSION ge v4.7 or die;
+
+    BDB::VERSION min-version
+        Returns true if the BDB version is at least the given version
+        (specified as a v-string), false otherwise.
+
+        Example: check for at least version 4.5.
+
+           BDB::VERSION v4.7 or die;
+
+    BDB::VERSION min-version, max-version
+        Returns true of the BDB version is at least version "min-version"
+        (specify "undef" or "v0" for any minimum version) and less then
+        "max-version".
+
+        Example: check wether version is strictly less then v4.7.
+
+           BDB::VERSION v0, v4.7
+              or die "version 4.7 is not yet supported";
+
    CONTROLLING THE NUMBER OF THREADS
     BDB::min_parallel $nthreads
         Set the minimum number of BDB threads to $nthreads. The current
@@ -534,9 +578,14 @@ REQUEST ANATOMY AND LIFETIME
     BDB::set_sync_prepare $cb
         Sets a callback that is called whenever a request is created without
         an explicit callback. It has to return two code references. The
-        first is used as the request callback, and the second is called to
-        wait until the first callback has been called. The default
-        implementation works like this:
+        first is used as the request callback (it should save the return
+        status), and the second is called to wait until the first callback
+        has been called (it must set $! to the return status).
+
+        This mechanism can be used to include BDB into other event
+        mechanisms, such as AnyEvent::BDB or Coro::BDB.
+
+        The default implementation works like this:
 
            sub {
               my $status;
@@ -545,6 +594,10 @@ REQUEST ANATOMY AND LIFETIME
                  sub { BDB::poll while !defined $status; $! = $status },
               )
            }
+
+        It simply blocks the process till the request has finished and then
+        sets $! to the return value. This means that if you don't use a
+        callback, BDB will simply fall back to synchronous operations.
 
    STATISTICAL INFORMATION
     BDB::nreqs
