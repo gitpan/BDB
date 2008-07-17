@@ -113,14 +113,36 @@ REQUEST ANATOMY AND LIFETIME
     unsigned 32 bit integer, "int" is some integer, "NV" is a floating point
     value.
 
-    The "SV *" types are generic perl scalars (for input and output of data
-    values), and the "SV *callback" is the optional callback function to
-    call when the request is completed.
+    Most "SV *" types are generic perl scalars (for input and output of data
+    values).
 
     The various "DB_ENV" etc. arguments are handles return by
     "db_env_create", "db_create", "txn_begin" and so on. If they have an
     appended "_ornull" this means they are optional and you can pass "undef"
     for them, resulting a NULL pointer on the C level.
+
+    The "SV *callback" is the optional callback function to call when the
+    request is completed. This last callback argument is special: the
+    callback is simply the last argument passed. If there are "optional"
+    arguments before the callback they can be left out. The callback itself
+    can be left out or specified as "undef", in which case the function will
+    be executed synchronously.
+
+    For example, "db_env_txn_checkpoint" usually is called with all integer
+    arguments zero. These can be left out, so all of these specify a call to
+    "DB_ENV->txn_checkpoint", to be executed asynchronously with a callback
+    to be called:
+
+       db_env_txn_checkpoint $db_env, 0, 0, 0, sub { };
+       db_env_txn_checkpoint $db_env, 0, 0, sub { };
+       db_env_txn_checkpoint $db_env, sub { };
+
+    While these all specify a call to "DB_ENV->txn_checkpoint" to be
+    executed synchronously:
+
+       db_env_txn_checkpoint $db_env, 0, 0, 0, undef;
+       db_env_txn_checkpoint $db_env, 0, 0, 0;
+       db_env_txn_checkpoint $db_env, 0;
 
    BDB functions
     Functions in the BDB namespace, exported by default:
@@ -154,6 +176,7 @@ REQUEST ANATOMY AND LIFETIME
        db_key_range (DB *db, DB_TXN_ornull *txn, SV *key, SV *key_range, U32 flags = 0, SV *callback = &PL_sv_undef)
        db_put (DB *db, DB_TXN_ornull *txn, SV *key, SV *data, U32 flags = 0, SV *callback = &PL_sv_undef)
           flags: APPEND NODUPDATA NOOVERWRITE
+       db_exists (DB *db, DB_TXN_ornull *txn, SV *key, U32 flags = 0, SV *callback = 0) (v4.6)
        db_get (DB *db, DB_TXN_ornull *txn, SV *key, SV *data, U32 flags = 0, SV *callback = &PL_sv_undef)
           flags: CONSUME CONSUME_WAIT GET_BOTH SET_RECNO MULTIPLE READ_COMMITTED READ_UNCOMMITTED RMW
        db_pget (DB *db, DB_TXN_ornull *txn, SV *key, SV *pkey, SV *data, U32 flags = 0, SV *callback = &PL_sv_undef)
@@ -229,8 +252,8 @@ REQUEST ANATOMY AND LIFETIME
        $int = $env->set_shm_key (long shm_key)
        $int = $env->set_cachesize (U32 gbytes, U32 bytes, int ncache = 0)
        $int = $env->set_flags (U32 flags, int onoff = 1)
-       $int = $env->log_set_config (U32 flags, int onoff = 1) [v4.7]
-       $int = $env->set_intermediate_dir_mode (const char *modestring) [v4.7]
+       $int = $env->log_set_config (U32 flags, int onoff = 1) (v4.7)
+       $int = $env->set_intermediate_dir_mode (const char *modestring) (v4.7)
        $env->set_errfile (FILE *errfile = 0)
        $env->set_msgfile (FILE *msgfile = 0)
        $int = $env->set_verbose (U32 which, int onoff = 1)
@@ -252,6 +275,7 @@ REQUEST ANATOMY AND LIFETIME
 
        $txn = $env->txn_begin (DB_TXN_ornull *parent = 0, U32 flags = 0)
           flags: READ_COMMITTED READ_UNCOMMITTED TXN_NOSYNC TXN_NOWAIT TXN_SNAPSHOT TXN_SYNC TXN_WAIT TXN_WRITE_NOSYNC
+       $txn = $env->cdsgroup_begin; (v4.5)
 
    Example:
        use AnyEvent;
@@ -345,7 +369,7 @@ REQUEST ANATOMY AND LIFETIME
                if (dbc)
                  dbc->c_close (dbc);
 
-       $int = $cursor->set_priority ($priority = PRIORITY_*)
+       $int = $cursor->set_priority ($priority = PRIORITY_*) (v4.6)
 
    Example:
        my $c = $db->cursor;

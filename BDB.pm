@@ -110,14 +110,16 @@ use strict 'vars';
 
 use base 'Exporter';
 
+our $VERSION;
+
 BEGIN {
-   our $VERSION = '1.6';
+   $VERSION = '1.7';
 
    our @BDB_REQ = qw(
       db_env_open db_env_close db_env_txn_checkpoint db_env_lock_detect
       db_env_memp_sync db_env_memp_trickle db_env_dbrename db_env_dbremove
       db_open db_close db_compact db_sync db_upgrade
-      db_put db_get db_pget db_del db_key_range
+      db_put db_exists db_get db_pget db_del db_key_range
       db_txn_commit db_txn_abort db_txn_finish
       db_c_close db_c_count db_c_put db_c_get db_c_pget db_c_del
       db_sequence_open db_sequence_close
@@ -162,14 +164,36 @@ C<bdb_filename> is a "filename" (octets on unix, madness on windows),
 C<U32> is an unsigned 32 bit integer, C<int> is some integer, C<NV> is a
 floating point value.
 
-The C<SV *> types are generic perl scalars (for input and output of data
-values), and the C<SV *callback> is the optional callback function to call
-when the request is completed.
+Most C<SV *> types are generic perl scalars (for input and output of data
+values).
 
 The various C<DB_ENV> etc. arguments are handles return by
 C<db_env_create>, C<db_create>, C<txn_begin> and so on. If they have an
 appended C<_ornull> this means they are optional and you can pass C<undef>
 for them, resulting a NULL pointer on the C level.
+
+The C<SV *callback> is the optional callback function to call when the
+request is completed. This last callback argument is special: the callback
+is simply the last argument passed. If there are "optional" arguments
+before the callback they can be left out. The callback itself can be left
+out or specified as C<undef>, in which case the function will be executed
+synchronously.
+
+For example, C<db_env_txn_checkpoint> usually is called with all integer
+arguments zero. These can be left out, so all of these specify a call
+to C<< DB_ENV->txn_checkpoint >>, to be executed asynchronously with a
+callback to be called:
+
+   db_env_txn_checkpoint $db_env, 0, 0, 0, sub { };
+   db_env_txn_checkpoint $db_env, 0, 0, sub { };
+   db_env_txn_checkpoint $db_env, sub { };
+
+While these all specify a call to C<< DB_ENV->txn_checkpoint >> to be
+executed synchronously:
+
+   db_env_txn_checkpoint $db_env, 0, 0, 0, undef;
+   db_env_txn_checkpoint $db_env, 0, 0, 0;
+   db_env_txn_checkpoint $db_env, 0;
 
 =head3 BDB functions
 
@@ -204,6 +228,7 @@ Functions in the BDB namespace, exported by default:
    db_key_range (DB *db, DB_TXN_ornull *txn, SV *key, SV *key_range, U32 flags = 0, SV *callback = &PL_sv_undef)
    db_put (DB *db, DB_TXN_ornull *txn, SV *key, SV *data, U32 flags = 0, SV *callback = &PL_sv_undef)
       flags: APPEND NODUPDATA NOOVERWRITE
+   db_exists (DB *db, DB_TXN_ornull *txn, SV *key, U32 flags = 0, SV *callback = 0) (v4.6)
    db_get (DB *db, DB_TXN_ornull *txn, SV *key, SV *data, U32 flags = 0, SV *callback = &PL_sv_undef)
       flags: CONSUME CONSUME_WAIT GET_BOTH SET_RECNO MULTIPLE READ_COMMITTED READ_UNCOMMITTED RMW
    db_pget (DB *db, DB_TXN_ornull *txn, SV *key, SV *pkey, SV *data, U32 flags = 0, SV *callback = &PL_sv_undef)
@@ -281,8 +306,8 @@ Methods available on DB_ENV/$env handles:
    $int = $env->set_shm_key (long shm_key)
    $int = $env->set_cachesize (U32 gbytes, U32 bytes, int ncache = 0)
    $int = $env->set_flags (U32 flags, int onoff = 1)
-   $int = $env->log_set_config (U32 flags, int onoff = 1) [v4.7]
-   $int = $env->set_intermediate_dir_mode (const char *modestring) [v4.7]
+   $int = $env->log_set_config (U32 flags, int onoff = 1) (v4.7)
+   $int = $env->set_intermediate_dir_mode (const char *modestring) (v4.7)
    $env->set_errfile (FILE *errfile = 0)
    $env->set_msgfile (FILE *msgfile = 0)
    $int = $env->set_verbose (U32 which, int onoff = 1)
@@ -304,6 +329,7 @@ Methods available on DB_ENV/$env handles:
 
    $txn = $env->txn_begin (DB_TXN_ornull *parent = 0, U32 flags = 0)
       flags: READ_COMMITTED READ_UNCOMMITTED TXN_NOSYNC TXN_NOWAIT TXN_SNAPSHOT TXN_SYNC TXN_WAIT TXN_WRITE_NOSYNC
+   $txn = $env->cdsgroup_begin; (v4.5)
 
 =head4 Example:
 
@@ -405,7 +431,7 @@ Methods available on DBC/$dbc handles:
            if (dbc)
              dbc->c_close (dbc);
 
-   $int = $cursor->set_priority ($priority = PRIORITY_*)
+   $int = $cursor->set_priority ($priority = PRIORITY_*) (v4.6)
 
 =head4 Example:
 
@@ -591,14 +617,21 @@ Example: check wether version is strictly less then v4.7.
 =cut
 
 sub VERSION {
-   if (@_ > 0) {
-      return undef if VERSION_v lt $_[0];
-      if (@_ > 1) {
-         return undef if VERSION_v ge $_[1];
-      }
-   }
+   # I was dumb enough to override the VERSION method here, so let's try
+   # to fix it up.
 
-   VERSION_v
+   if ($_[0] eq __PACKAGE__) {
+      $VERSION
+   } else {
+      if (@_ > 0) {
+         return undef if VERSION_v lt $_[0];
+         if (@_ > 1) {
+            return undef if VERSION_v ge $_[1];
+         }
+      }
+
+      VERSION_v
+   }
 }
 
 =head3 CONTROLLING THE NUMBER OF THREADS

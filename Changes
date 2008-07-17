@@ -1,5 +1,15 @@
 Revision history for perl module BDB.
 
+1.7  Thu Jul 17 14:09:25 CEST 2008
+	- use a totally different mechanism to pass callbacks to
+          requests (see manpage).
+        - optional arguments before the callback can now be left out.
+        - use less memory per request, probably be a bit faster, too.
+        - fix a memory leak (callbacks were never freed).
+        - add a basic testsuite.
+        - add (untested) support for cdsgroup_begin and db_exists.
+        - make BDB::VERSION compatible to UNIVERSAL::VERSION.
+
 1.6  Tue Jul  8 10:34:58 CEST 2008
 	- add new BDB::VERSION function for easy version checks.
 	- work around broken bsd headers once more.

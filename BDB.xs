@@ -141,7 +141,7 @@ enum {
   REQ_ENV_OPEN, REQ_ENV_CLOSE, REQ_ENV_TXN_CHECKPOINT, REQ_ENV_LOCK_DETECT,
   REQ_ENV_MEMP_SYNC, REQ_ENV_MEMP_TRICKLE, REQ_ENV_DBREMOVE, REQ_ENV_DBRENAME,
   REQ_DB_OPEN, REQ_DB_CLOSE, REQ_DB_COMPACT, REQ_DB_SYNC, REQ_DB_UPGRADE,
-  REQ_DB_PUT, REQ_DB_GET, REQ_DB_PGET, REQ_DB_DEL, REQ_DB_KEY_RANGE,
+  REQ_DB_PUT, REQ_DB_EXISTS, REQ_DB_GET, REQ_DB_PGET, REQ_DB_DEL, REQ_DB_KEY_RANGE,
   REQ_TXN_COMMIT, REQ_TXN_ABORT, REQ_TXN_FINISH,
   REQ_C_CLOSE, REQ_C_COUNT, REQ_C_PUT, REQ_C_GET, REQ_C_PGET, REQ_C_DEL,
   REQ_SEQ_OPEN, REQ_SEQ_CLOSE, REQ_SEQ_GET, REQ_SEQ_REMOVE,
@@ -342,7 +342,7 @@ static int req_invoke (bdb_req req)
 {
   dSP;
 
-  if (SvOK (req->callback))
+  if (req->callback)
     {
       ENTER;
       SAVETMPS;
@@ -413,9 +413,12 @@ static int req_invoke (bdb_req req)
 
 static void req_free (bdb_req req)
 {
+  SvREFCNT_dec (req->callback);
+
   free (req->buf1);
   free (req->buf2);
   free (req->buf3);
+
   Safefree (req);
 }
 
@@ -519,7 +522,7 @@ static void req_send (bdb_req req)
     }
 
   // synthesize callback if none given
-  if (!SvOK (req->callback))
+  if (!req->callback)
     {
       int count;
 
@@ -807,6 +810,11 @@ X_THREAD_PROC (bdb_proc)
             req->result = req->db->put (req->db, req->txn, &req->dbt1, &req->dbt2, req->uint1);
             break;
 
+#if DB_VERSION_MINOR >= 6
+          case REQ_DB_EXISTS:
+            req->result = req->db->exists (req->db, req->txn, &req->dbt1, req->uint1);
+            break;
+#endif
           case REQ_DB_GET:
             req->result = req->db->get (req->db, req->txn, &req->dbt1, &req->dbt3, req->uint1);
             break;
@@ -969,14 +977,14 @@ static void atfork_child (void)
   int req_pri = next_pri;					\
   next_pri = DEFAULT_PRI + PRI_BIAS;				\
 								\
-  if (SvOK (callback) && !SvROK (callback))			\
-    croak ("callback must be undef or of reference type");	\
+  if (callback && SvOK (callback))				\
+    croak ("callback has illegal type or extra arguments");	\
 								\
   Newz (0, req, 1, bdb_cb);	        			\
   if (!req)							\
     croak ("out of memory during bdb_req allocation");		\
 								\
-  req->callback = newSVsv (callback);				\
+  req->callback = cb ? SvREFCNT_inc (cb) : 0;			\
   req->type = (reqtype); 					\
   req->pri = req_pri
 
@@ -999,8 +1007,7 @@ static void atfork_child (void)
         croak (# var " is not a valid " # class " object anymore");		\
     }                                                           		\
   else                                                          		\
-    croak (# var " is not of type " # class);					\
-										\
+    croak (# var " is not of type " # class);
 
 static void
 ptr_nuke (SV *sv)
@@ -1047,6 +1054,41 @@ patch_errno (void)
   vtbl_errno.svt_get = errno_get;
   mg->mg_virtual = &vtbl_errno;
 }
+
+#if __GNUC__ >= 4
+# define noinline                   __attribute__ ((noinline))
+#else
+# define noinline
+#endif
+
+static noinline SV *
+pop_callback (I32 *ritems, SV *sv)
+{
+  if (SvROK (sv))
+    {
+      HV *st;
+      GV *gvp;
+      CV *cv;
+      const char *name;
+
+      /* forgive me */
+      if (SvTYPE (SvRV (sv)) == SVt_PVMG
+          && (st = SvSTASH (SvRV (sv)))
+          && (name = HvNAME_get (st))
+          && (name [0] == 'B' && name [1] == 'D' && name [2] == 'B' && name [3] == ':'))
+        return 0;
+
+      if ((cv = sv_2cv (sv, &st, &gvp, 0)))
+        {
+          --*ritems;
+          return (SV *)cv;
+        }
+    }
+
+  return 0;
+}
+
+#define CALLBACK SV *cb = pop_callback (&items, ST (items - 1));
 
 MODULE = BDB                PACKAGE = BDB
 
@@ -1433,11 +1475,12 @@ db_env_create (U32 env_flags = 0)
 	RETVAL
 
 void
-db_env_open (DB_ENV *env, bdb_filename db_home, U32 open_flags, int mode, SV *callback = &PL_sv_undef)
+db_env_open (DB_ENV *env, bdb_filename db_home, U32 open_flags, int mode, SV *callback = 0)
+	PREINIT:
+        CALLBACK
 	CODE:
 {
         dREQ (REQ_ENV_OPEN);
-
         req->env   = env;
         req->uint1 = open_flags | DB_THREAD;
         req->int1  = mode;
@@ -1446,7 +1489,9 @@ db_env_open (DB_ENV *env, bdb_filename db_home, U32 open_flags, int mode, SV *ca
 }
 
 void
-db_env_close (DB_ENV *env, U32 flags = 0, SV *callback = &PL_sv_undef)
+db_env_close (DB_ENV *env, U32 flags = 0, SV *callback = 0)
+	PREINIT:
+        CALLBACK
 	CODE:
 {
 	dREQ (REQ_ENV_CLOSE);
@@ -1457,7 +1502,9 @@ db_env_close (DB_ENV *env, U32 flags = 0, SV *callback = &PL_sv_undef)
 }
 
 void
-db_env_txn_checkpoint (DB_ENV *env, U32 kbyte = 0, U32 min = 0, U32 flags = 0, SV *callback = &PL_sv_undef)
+db_env_txn_checkpoint (DB_ENV *env, U32 kbyte = 0, U32 min = 0, U32 flags = 0, SV *callback = 0)
+	PREINIT:
+        CALLBACK
 	CODE:
 {
         dREQ (REQ_ENV_TXN_CHECKPOINT);
@@ -1469,18 +1516,23 @@ db_env_txn_checkpoint (DB_ENV *env, U32 kbyte = 0, U32 min = 0, U32 flags = 0, S
 }
 
 void
-db_env_lock_detect (DB_ENV *env, U32 flags = 0, U32 atype = DB_LOCK_DEFAULT, SV *dummy = 0, SV *callback = &PL_sv_undef)
+db_env_lock_detect (DB_ENV *env, U32 flags = 0, U32 atype = DB_LOCK_DEFAULT, SV *dummy = 0, SV *callback = 0)
+	PREINIT:
+        CALLBACK
 	CODE:
 {
         dREQ (REQ_ENV_LOCK_DETECT);
         req->env   = env;
         req->uint1 = flags;
         req->uint2 = atype;
+        /* req->int2  = 0; dummy */
         REQ_SEND;
 }
 
 void
-db_env_memp_sync (DB_ENV *env, SV *dummy = 0, SV *callback = &PL_sv_undef)
+db_env_memp_sync (DB_ENV *env, SV *dummy = 0, SV *callback = 0)
+	PREINIT:
+        CALLBACK
 	CODE:
 {
         dREQ (REQ_ENV_MEMP_SYNC);
@@ -1489,7 +1541,9 @@ db_env_memp_sync (DB_ENV *env, SV *dummy = 0, SV *callback = &PL_sv_undef)
 }
 
 void
-db_env_memp_trickle (DB_ENV *env, int percent, SV *dummy = 0, SV *callback = &PL_sv_undef)
+db_env_memp_trickle (DB_ENV *env, int percent, SV *dummy = 0, SV *callback = 0)
+	PREINIT:
+        CALLBACK
 	CODE:
 {
         dREQ (REQ_ENV_MEMP_TRICKLE);
@@ -1499,7 +1553,9 @@ db_env_memp_trickle (DB_ENV *env, int percent, SV *dummy = 0, SV *callback = &PL
 }
 
 void
-db_env_dbremove (DB_ENV *env, DB_TXN_ornull *txnid, bdb_filename file, bdb_filename database, U32 flags = 0, SV *callback = &PL_sv_undef)
+db_env_dbremove (DB_ENV *env, DB_TXN_ornull *txnid, bdb_filename file, bdb_filename database, U32 flags = 0, SV *callback = 0)
+	PREINIT:
+        CALLBACK
 	CODE:
 {
 	dREQ (REQ_ENV_DBREMOVE);
@@ -1511,7 +1567,9 @@ db_env_dbremove (DB_ENV *env, DB_TXN_ornull *txnid, bdb_filename file, bdb_filen
 }
 
 void
-db_env_dbrename (DB_ENV *env, DB_TXN_ornull *txnid, bdb_filename file, bdb_filename database, bdb_filename newname, U32 flags = 0, SV *callback = &PL_sv_undef)
+db_env_dbrename (DB_ENV *env, DB_TXN_ornull *txnid, bdb_filename file, bdb_filename database, bdb_filename newname, U32 flags = 0, SV *callback = 0)
+	PREINIT:
+        CALLBACK
 	CODE:
 {
 	dREQ (REQ_ENV_DBRENAME);
@@ -1538,7 +1596,9 @@ db_create (DB_ENV *env = 0, U32 flags = 0)
 	RETVAL
 
 void
-db_open (DB *db, DB_TXN_ornull *txnid, bdb_filename file, bdb_filename database, int type, U32 flags, int mode, SV *callback = &PL_sv_undef)
+db_open (DB *db, DB_TXN_ornull *txnid, bdb_filename file, bdb_filename database, int type, U32 flags, int mode, SV *callback = 0)
+	PREINIT:
+        CALLBACK
 	CODE:
 {
         dREQ (REQ_DB_OPEN);
@@ -1553,7 +1613,9 @@ db_open (DB *db, DB_TXN_ornull *txnid, bdb_filename file, bdb_filename database,
 }
 
 void
-db_close (DB *db, U32 flags = 0, SV *callback = &PL_sv_undef)
+db_close (DB *db, U32 flags = 0, SV *callback = 0)
+	PREINIT:
+        CALLBACK
 	CODE:
 {
         dREQ (REQ_DB_CLOSE);
@@ -1565,7 +1627,9 @@ db_close (DB *db, U32 flags = 0, SV *callback = &PL_sv_undef)
 }
 
 void
-db_compact (DB *db, DB_TXN_ornull *txn = 0, SV *start = 0, SV *stop = 0, SV *unused1 = 0, U32 flags = DB_FREE_SPACE, SV *unused2 = 0, SV *callback = &PL_sv_undef)
+db_compact (DB *db, DB_TXN_ornull *txn = 0, SV *start = 0, SV *stop = 0, SV *unused1 = 0, U32 flags = DB_FREE_SPACE, SV *unused2 = 0, SV *callback = 0)
+	PREINIT:
+        CALLBACK
 	CODE:
 {
         dREQ (REQ_DB_COMPACT);
@@ -1578,7 +1642,9 @@ db_compact (DB *db, DB_TXN_ornull *txn = 0, SV *start = 0, SV *stop = 0, SV *unu
 }
 
 void
-db_sync (DB *db, U32 flags = 0, SV *callback = &PL_sv_undef)
+db_sync (DB *db, U32 flags = 0, SV *callback = 0)
+	PREINIT:
+        CALLBACK
 	CODE:
 {
         dREQ (REQ_DB_SYNC);
@@ -1588,7 +1654,9 @@ db_sync (DB *db, U32 flags = 0, SV *callback = &PL_sv_undef)
 }
 
 void
-db_upgrade (DB *db, bdb_filename file, U32 flags = 0, SV *callback = &PL_sv_undef)
+db_upgrade (DB *db, bdb_filename file, U32 flags = 0, SV *callback = 0)
+	PREINIT:
+        CALLBACK
 	CODE:
 {
         dREQ (REQ_DB_SYNC);
@@ -1599,7 +1667,9 @@ db_upgrade (DB *db, bdb_filename file, U32 flags = 0, SV *callback = &PL_sv_unde
 }
 
 void
-db_key_range (DB *db, DB_TXN_ornull *txn, SV *key, SV *key_range, U32 flags = 0, SV *callback = &PL_sv_undef)
+db_key_range (DB *db, DB_TXN_ornull *txn, SV *key, SV *key_range, U32 flags = 0, SV *callback = 0)
+	PREINIT:
+        CALLBACK
 	CODE:
 {
         dREQ (REQ_DB_KEY_RANGE);
@@ -1612,7 +1682,9 @@ db_key_range (DB *db, DB_TXN_ornull *txn, SV *key, SV *key_range, U32 flags = 0,
 }
 
 void
-db_put (DB *db, DB_TXN_ornull *txn, SV *key, SV *data, U32 flags = 0, SV *callback = &PL_sv_undef)
+db_put (DB *db, DB_TXN_ornull *txn, SV *key, SV *data, U32 flags = 0, SV *callback = 0)
+	PREINIT:
+        CALLBACK
 	CODE:
 {
         dREQ (REQ_DB_PUT);
@@ -1624,8 +1696,28 @@ db_put (DB *db, DB_TXN_ornull *txn, SV *key, SV *data, U32 flags = 0, SV *callba
         REQ_SEND;
 }
 
+#if DB_VERSION_MINOR >= 6
+
 void
-db_get (DB *db, DB_TXN_ornull *txn, SV *key, SV *data, U32 flags = 0, SV *callback = &PL_sv_undef)
+db_exists (DB *db, DB_TXN_ornull *txn, SV *key, U32 flags = 0, SV *callback = 0)
+	PREINIT:
+        CALLBACK
+	CODE:
+{
+        dREQ (REQ_DB_EXISTS);
+        req->db    = db;
+        req->txn   = txn;
+        req->uint1 = flags;
+        sv_to_dbt (&req->dbt1, key);
+        REQ_SEND;
+}
+
+#endif
+
+void
+db_get (DB *db, DB_TXN_ornull *txn, SV *key, SV *data, U32 flags = 0, SV *callback = 0)
+	PREINIT:
+        CALLBACK
 	CODE:
         if (SvREADONLY (data))
           croak ("can't modify read-only data scalar in db_get");
@@ -1641,7 +1733,9 @@ db_get (DB *db, DB_TXN_ornull *txn, SV *key, SV *data, U32 flags = 0, SV *callba
 }
 
 void
-db_pget (DB *db, DB_TXN_ornull *txn, SV *key, SV *pkey, SV *data, U32 flags = 0, SV *callback = &PL_sv_undef)
+db_pget (DB *db, DB_TXN_ornull *txn, SV *key, SV *pkey, SV *data, U32 flags = 0, SV *callback = 0)
+	PREINIT:
+        CALLBACK
 	CODE:
         if (SvREADONLY (data))
           croak ("can't modify read-only data scalar in db_pget");
@@ -1658,7 +1752,9 @@ db_pget (DB *db, DB_TXN_ornull *txn, SV *key, SV *pkey, SV *data, U32 flags = 0,
 }
 
 void
-db_del (DB *db, DB_TXN_ornull *txn, SV *key, U32 flags = 0, SV *callback = &PL_sv_undef)
+db_del (DB *db, DB_TXN_ornull *txn, SV *key, U32 flags = 0, SV *callback = 0)
+	PREINIT:
+        CALLBACK
 	CODE:
 {
         dREQ (REQ_DB_DEL);
@@ -1670,7 +1766,9 @@ db_del (DB *db, DB_TXN_ornull *txn, SV *key, U32 flags = 0, SV *callback = &PL_s
 }
 
 void
-db_txn_commit (DB_TXN *txn, U32 flags = 0, SV *callback = &PL_sv_undef)
+db_txn_commit (DB_TXN *txn, U32 flags = 0, SV *callback = 0)
+	PREINIT:
+        CALLBACK
 	CODE:
 {
         dREQ (REQ_TXN_COMMIT);
@@ -1681,7 +1779,9 @@ db_txn_commit (DB_TXN *txn, U32 flags = 0, SV *callback = &PL_sv_undef)
 }
 
 void
-db_txn_abort (DB_TXN *txn, SV *callback = &PL_sv_undef)
+db_txn_abort (DB_TXN *txn, SV *callback = 0)
+	PREINIT:
+        CALLBACK
 	CODE:
 {
         dREQ (REQ_TXN_ABORT);
@@ -1691,7 +1791,9 @@ db_txn_abort (DB_TXN *txn, SV *callback = &PL_sv_undef)
 }
 
 void
-db_txn_finish (DB_TXN *txn, U32 flags = 0, SV *callback = &PL_sv_undef)
+db_txn_finish (DB_TXN *txn, U32 flags = 0, SV *callback = 0)
+	PREINIT:
+        CALLBACK
 	CODE:
 {
         dREQ (REQ_TXN_FINISH);
@@ -1702,7 +1804,9 @@ db_txn_finish (DB_TXN *txn, U32 flags = 0, SV *callback = &PL_sv_undef)
 }
 
 void
-db_c_close (DBC *dbc, SV *callback = &PL_sv_undef)
+db_c_close (DBC *dbc, SV *callback = 0)
+	PREINIT:
+        CALLBACK
 	CODE:
 {
         dREQ (REQ_C_CLOSE);
@@ -1712,7 +1816,9 @@ db_c_close (DBC *dbc, SV *callback = &PL_sv_undef)
 }
 
 void
-db_c_count (DBC *dbc, SV *count, U32 flags = 0, SV *callback = &PL_sv_undef)
+db_c_count (DBC *dbc, SV *count, U32 flags = 0, SV *callback = 0)
+	PREINIT:
+        CALLBACK
 	CODE:
 {
         dREQ (REQ_C_COUNT);
@@ -1722,7 +1828,9 @@ db_c_count (DBC *dbc, SV *count, U32 flags = 0, SV *callback = &PL_sv_undef)
 }
 
 void
-db_c_put (DBC *dbc, SV *key, SV *data, U32 flags = 0, SV *callback = &PL_sv_undef)
+db_c_put (DBC *dbc, SV *key, SV *data, U32 flags = 0, SV *callback = 0)
+	PREINIT:
+        CALLBACK
 	CODE:
 {
         dREQ (REQ_C_PUT);
@@ -1734,7 +1842,9 @@ db_c_put (DBC *dbc, SV *key, SV *data, U32 flags = 0, SV *callback = &PL_sv_unde
 }
 
 void
-db_c_get (DBC *dbc, SV *key, SV *data, U32 flags = 0, SV *callback = &PL_sv_undef)
+db_c_get (DBC *dbc, SV *key, SV *data, U32 flags = 0, SV *callback = 0)
+	PREINIT:
+        CALLBACK
 	CODE:
 {
         dREQ (REQ_C_GET);
@@ -1759,7 +1869,9 @@ db_c_get (DBC *dbc, SV *key, SV *data, U32 flags = 0, SV *callback = &PL_sv_unde
 }
 
 void
-db_c_pget (DBC *dbc, SV *key, SV *pkey, SV *data, U32 flags = 0, SV *callback = &PL_sv_undef)
+db_c_pget (DBC *dbc, SV *key, SV *pkey, SV *data, U32 flags = 0, SV *callback = 0)
+	PREINIT:
+        CALLBACK
 	CODE:
 {
         dREQ (REQ_C_PGET);
@@ -1787,7 +1899,9 @@ db_c_pget (DBC *dbc, SV *key, SV *pkey, SV *data, U32 flags = 0, SV *callback = 
 }
 
 void
-db_c_del (DBC *dbc, U32 flags = 0, SV *callback = &PL_sv_undef)
+db_c_del (DBC *dbc, U32 flags = 0, SV *callback = 0)
+	PREINIT:
+        CALLBACK
 	CODE:
 {
         dREQ (REQ_C_DEL);
@@ -1798,7 +1912,9 @@ db_c_del (DBC *dbc, U32 flags = 0, SV *callback = &PL_sv_undef)
 
 
 void
-db_sequence_open (DB_SEQUENCE *seq, DB_TXN_ornull *txnid, SV *key, U32 flags = 0, SV *callback = &PL_sv_undef)
+db_sequence_open (DB_SEQUENCE *seq, DB_TXN_ornull *txnid, SV *key, U32 flags = 0, SV *callback = 0)
+	PREINIT:
+        CALLBACK
 	CODE:
 {
         dREQ (REQ_SEQ_OPEN);
@@ -1810,7 +1926,9 @@ db_sequence_open (DB_SEQUENCE *seq, DB_TXN_ornull *txnid, SV *key, U32 flags = 0
 }
 
 void
-db_sequence_close (DB_SEQUENCE *seq, U32 flags = 0, SV *callback = &PL_sv_undef)
+db_sequence_close (DB_SEQUENCE *seq, U32 flags = 0, SV *callback = 0)
+	PREINIT:
+        CALLBACK
 	CODE:
 {
         dREQ (REQ_SEQ_CLOSE);
@@ -1821,7 +1939,9 @@ db_sequence_close (DB_SEQUENCE *seq, U32 flags = 0, SV *callback = &PL_sv_undef)
 }
 
 void
-db_sequence_get (DB_SEQUENCE *seq, DB_TXN_ornull *txnid, int delta, SV *seq_value, U32 flags = DB_TXN_NOSYNC, SV *callback = &PL_sv_undef)
+db_sequence_get (DB_SEQUENCE *seq, DB_TXN_ornull *txnid, int delta, SV *seq_value, U32 flags = DB_TXN_NOSYNC, SV *callback = 0)
+	PREINIT:
+        CALLBACK
 	CODE:
 {
         dREQ (REQ_SEQ_GET);
@@ -1834,7 +1954,9 @@ db_sequence_get (DB_SEQUENCE *seq, DB_TXN_ornull *txnid, int delta, SV *seq_valu
 }
 
 void
-db_sequence_remove (DB_SEQUENCE *seq, DB_TXN_ornull *txnid = 0, U32 flags = 0, SV *callback = &PL_sv_undef)
+db_sequence_remove (DB_SEQUENCE *seq, DB_TXN_ornull *txnid = 0, U32 flags = 0, SV *callback = 0)
+	PREINIT:
+        CALLBACK
 	CODE:
 {
         dREQ (REQ_SEQ_REMOVE);
@@ -2018,6 +2140,19 @@ txn_begin (DB_ENV *env, DB_TXN_ornull *parent = 0, U32 flags = 0)
           croak ("DB_ENV->txn_begin: %s", db_strerror (errno));
         OUTPUT:
         RETVAL
+
+#if DB_VERSION_MINOR >= 5
+
+DB_TXN *
+cdsgroup_begin (DB_ENV *env)
+	CODE:
+        errno = env->cdsgroup_begin (env, &RETVAL);
+        if (errno)
+          croak ("DB_ENV->cdsgroup_begin: %s", db_strerror (errno));
+        OUTPUT:
+        RETVAL
+
+#endif
 
 MODULE = BDB		PACKAGE = BDB::Db
 

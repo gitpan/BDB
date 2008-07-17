@@ -8,5 +8,6 @@ BDB.xs
 xthread.h
 eg/basic_operations
 t/00_load.t
+t/01_basic.t
 typemap
 META.yml                                 Module meta-data (added by MakeMaker)
