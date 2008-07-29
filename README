@@ -495,7 +495,7 @@ REQUEST ANATOMY AND LIFETIME
     incompatibilities. This means that traditional "at least version x.x"
     checks are often not sufficient.
 
-    Example: set the log_autoremove option in a way compatible with <v.47
+    Example: set the log_autoremove option in a way compatible with <v4.7
     and v4.7. Note the use of & on the constants to avoid triggering a
     compiletime bug when the symbol isn't available.
 

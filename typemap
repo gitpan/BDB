@@ -14,9 +14,11 @@ DB_SEQUENCE *  		DB_SEQUENCE
 DB_SEQUENCE_ornull *	DB_SEQUENCE_ornull
 DB_SEQUENCE_ornuked *	DB_SEQUENCE_ornuked
 
-SV8 *		T_SV8
-bdb_filename	BDB_FILENAME
-db_seq_t	DB_SEQ
+SV8 *			T_SV8
+bdb_filename		BDB_FILENAME
+db_seq_t		DB_SEQ
+
+const char *		T_PV
 
 
 INPUT

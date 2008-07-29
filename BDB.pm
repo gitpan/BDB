@@ -113,7 +113,7 @@ use base 'Exporter';
 our $VERSION;
 
 BEGIN {
-   $VERSION = '1.7';
+   $VERSION = '1.71';
 
    our @BDB_REQ = qw(
       db_env_open db_env_close db_env_txn_checkpoint db_env_lock_detect
@@ -574,7 +574,7 @@ BerkeleyDB comes in various versions, many of them have minor
 incompatibilities. This means that traditional "at least version x.x"
 checks are often not sufficient.
 
-Example: set the log_autoremove option in a way compatible with <v.47 and
+Example: set the log_autoremove option in a way compatible with <v4.7 and
 v4.7. Note the use of & on the constants to avoid triggering a compiletime
 bug when the symbol isn't available.
 

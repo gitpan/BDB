@@ -1,3 +1,5 @@
+#define X_STACKSIZE 1024 * 128 + sizeof (long) * 64 * 1024 / 4
+
 #include "xthread.h"
 
 #include <errno.h>
@@ -29,8 +31,8 @@
 
 #include <db.h>
 
-#if DB_VERSION_MAJOR < 4 || (DB_VERSION_MAJOR == 4 && DB_VERSION_MINOR < 4)
-# error you need Berkeley DB 4.4 or newer installed
+#if DB_VERSION_MAJOR != 4 || (DB_VERSION_MAJOR == 4 && DB_VERSION_MINOR < 3)
+# error you need Berkeley DB 4.3 or a newer 4.x version installed
 #endif
 
 /* number of seconds after which idle threads exit */
@@ -40,13 +42,16 @@ typedef DB_ENV      DB_ENV_ornull;
 typedef DB_TXN      DB_TXN_ornull;
 typedef DBC         DBC_ornull;
 typedef DB          DB_ornull;
-typedef DB_SEQUENCE DB_SEQUENCE_ornull;
 
 typedef DB_ENV      DB_ENV_ornuked;
 typedef DB_TXN      DB_TXN_ornuked;
 typedef DBC         DBC_ornuked;
 typedef DB          DB_ornuked;
+
+#if DB_VERSION_MINOR >= 3
+typedef DB_SEQUENCE DB_SEQUENCE_ornull;
 typedef DB_SEQUENCE DB_SEQUENCE_ornuked;
+#endif
 
 typedef SV SV8; /* byte-sv, used for argument-checking */
 typedef char *bdb_filename;
@@ -166,8 +171,10 @@ typedef struct bdb_cb
 
   DBT dbt1, dbt2, dbt3;
   DB_KEY_RANGE key_range;
+#if DB_VERSION_MINOR >= 3
   DB_SEQUENCE *seq;
   db_seq_t seq_t;
+#endif
 } bdb_cb;
 
 typedef bdb_cb *bdb_req;
@@ -386,6 +393,7 @@ static int req_invoke (bdb_req req)
             }
             break;
 
+#if DB_VERSION_MINOR >= 3
           case REQ_SEQ_GET:
             SvREADONLY_off (req->sv1);
 
@@ -396,6 +404,7 @@ static int req_invoke (bdb_req req)
 
             SvREFCNT_dec (req->sv1);
             break;
+#endif
         }
 
       errno = req->result;
@@ -794,9 +803,11 @@ X_THREAD_PROC (bdb_proc)
             req->result = req->db->close (req->db, req->uint1);
             break;
 
+#if DB_VERSION_MINOR >= 4
           case REQ_DB_COMPACT:
             req->result = req->db->compact (req->db, req->txn, &req->dbt1, &req->dbt2, 0, req->uint1, 0);
             break;
+#endif
 
           case REQ_DB_SYNC:
             req->result = req->db->sync (req->db, req->uint1);
@@ -878,6 +889,7 @@ X_THREAD_PROC (bdb_proc)
             req->result = req->dbc->c_del (req->dbc, req->uint1);
             break;
 
+#if DB_VERSION_MINOR >= 3
           case REQ_SEQ_OPEN:
             req->result = req->seq->open (req->seq, req->txn, &req->dbt1, req->uint1);
             break;
@@ -893,6 +905,7 @@ X_THREAD_PROC (bdb_proc)
           case REQ_SEQ_REMOVE:
             req->result = req->seq->remove (req->seq, req->txn, req->uint1);
             break;
+#endif
 
           default:
             req->result = ENOSYS;
@@ -1088,6 +1101,8 @@ pop_callback (I32 *ritems, SV *sv)
   return 0;
 }
 
+/* stupid windoes defined CALLBACK as well */
+#undef CALLBACK
 #define CALLBACK SV *cb = pop_callback (&items, ST (items - 1));
 
 MODULE = BDB                PACKAGE = BDB
@@ -1119,12 +1134,10 @@ BOOT:
           const_iv (USE_ENVIRON_ROOT)
           const_iv (LOCKDOWN)
           const_iv (PRIVATE)
-          const_iv (REGISTER)
           const_iv (SYSTEM_MEM)
           const_iv (AUTO_COMMIT)
           const_iv (CDB_ALLDB)
           const_iv (DIRECT_DB)
-          const_iv (DSYNC_DB)
           const_iv (NOLOCKING)
           const_iv (NOMMAP)
           const_iv (NOPANIC)
@@ -1145,8 +1158,6 @@ BOOT:
           const_iv (RECNO)
           const_iv (UNKNOWN)
           const_iv (EXCL)
-          const_iv (READ_COMMITTED)
-          const_iv (READ_UNCOMMITTED)
           const_iv (TRUNCATE)
           const_iv (NOSYNC)
           const_iv (CHKSUM)
@@ -1156,7 +1167,6 @@ BOOT:
           const_iv (RECNUM)
           const_iv (RENUMBER)
           const_iv (REVSPLITOFF)
-          const_iv (INORDER)
           const_iv (CONSUME)
           const_iv (CONSUME_WAIT)
           const_iv (GET_BOTH)
@@ -1175,11 +1185,7 @@ BOOT:
           const_iv (RUNRECOVERY)
           const_iv (OLD_VERSION)
           const_iv (REP_HANDLE_DEAD)
-          const_iv (REP_LOCKOUT)
           const_iv (SECONDARY_BAD)
-
-          const_iv (FREE_SPACE)
-          const_iv (FREELIST_ONLY)
 
           const_iv (APPEND)
           const_iv (NODUPDATA)
@@ -1212,24 +1218,17 @@ BOOT:
           const_iv (LOCK_DEFAULT)
           const_iv (LOCK_EXPIRE)
           const_iv (LOCK_MAXLOCKS)
-          const_iv (LOCK_MAXWRITE)
           const_iv (LOCK_MINLOCKS)
           const_iv (LOCK_MINWRITE)
           const_iv (LOCK_OLDEST)
           const_iv (LOCK_RANDOM)
           const_iv (LOCK_YOUNGEST)
 
-          const_iv (SEQ_DEC)
-          const_iv (SEQ_INC)
-          const_iv (SEQ_WRAP)
-
-          const_iv (BUFFER_SMALL)
           const_iv (DONOTINDEX)
           const_iv (KEYEMPTY	)
           const_iv (KEYEXIST	)
           const_iv (LOCK_DEADLOCK)
           const_iv (LOCK_NOTGRANTED)
-          const_iv (LOG_BUFFER_FULL)
           const_iv (NOSERVER)
           const_iv (NOSERVER_HOME)
           const_iv (NOSERVER_ID)
@@ -1238,10 +1237,7 @@ BOOT:
           const_iv (REP_DUPMASTER)
           const_iv (REP_HANDLE_DEAD)
           const_iv (REP_HOLDELECTION)
-          const_iv (REP_IGNORE)
           const_iv (REP_ISPERM)
-          const_iv (REP_JOIN_FAILURE)
-          const_iv (REP_LOCKOUT)
           const_iv (REP_NEWMASTER)
           const_iv (REP_NEWSITE)
           const_iv (REP_NOTPERM)
@@ -1249,17 +1245,37 @@ BOOT:
           const_iv (RUNRECOVERY)
           const_iv (SECONDARY_BAD)
           const_iv (VERIFY_BAD)
-          const_iv (VERSION_MISMATCH)
 
           const_iv (VERB_DEADLOCK)
           const_iv (VERB_RECOVERY)
-          const_iv (VERB_REGISTER)
           const_iv (VERB_REPLICATION)
           const_iv (VERB_WAITSFOR)
 
           const_iv (VERSION_MAJOR)
           const_iv (VERSION_MINOR)
           const_iv (VERSION_PATCH)
+#if DB_VERSION_MINOR >= 3
+          const_iv (INORDER)
+          const_iv (LOCK_MAXWRITE)
+          const_iv (SEQ_DEC)
+          const_iv (SEQ_INC)
+          const_iv (SEQ_WRAP)
+          const_iv (BUFFER_SMALL)
+          const_iv (LOG_BUFFER_FULL)
+          const_iv (VERSION_MISMATCH)
+#endif
+#if DB_VERSION_MINOR >= 4
+          const_iv (REGISTER)
+          const_iv (DSYNC_DB)
+          const_iv (READ_COMMITTED)
+          const_iv (READ_UNCOMMITTED)
+          const_iv (REP_IGNORE)
+          const_iv (REP_LOCKOUT)
+          const_iv (REP_JOIN_FAILURE)
+          const_iv (FREE_SPACE)
+          const_iv (FREELIST_ONLY)
+          const_iv (VERB_REGISTER)
+#endif
 #if DB_VERSION_MINOR >= 5
           const_iv (MULTIVERSION)
           const_iv (TXN_SNAPSHOT)
@@ -1281,9 +1297,11 @@ BOOT:
           const_iv (LOG_ZERO)
 #else
           const_iv (DIRECT_LOG)
-          const_iv (DSYNC_LOG)
           const_iv (LOG_AUTOREMOVE)
+# if DB_VERSION_MINOR >= 3
+          const_iv (DSYNC_LOG)
           const_iv (LOG_INMEMORY)
+# endif
 #endif
         };
 
@@ -1626,6 +1644,8 @@ db_close (DB *db, U32 flags = 0, SV *callback = 0)
         ptr_nuke (ST (0));
 }
 
+#if DB_VERSION_MINOR >= 4
+
 void
 db_compact (DB *db, DB_TXN_ornull *txn = 0, SV *start = 0, SV *stop = 0, SV *unused1 = 0, U32 flags = DB_FREE_SPACE, SV *unused2 = 0, SV *callback = 0)
 	PREINIT:
@@ -1640,6 +1660,8 @@ db_compact (DB *db, DB_TXN_ornull *txn = 0, SV *start = 0, SV *stop = 0, SV *unu
         req->uint1 = flags;
         REQ_SEND;
 }
+
+#endif
 
 void
 db_sync (DB *db, U32 flags = 0, SV *callback = 0)
@@ -1911,6 +1933,8 @@ db_c_del (DBC *dbc, U32 flags = 0, SV *callback = 0)
 }
 
 
+#if DB_VERSION_MINOR >= 3
+
 void
 db_sequence_open (DB_SEQUENCE *seq, DB_TXN_ornull *txnid, SV *key, U32 flags = 0, SV *callback = 0)
 	PREINIT:
@@ -1965,6 +1989,8 @@ db_sequence_remove (DB_SEQUENCE *seq, DB_TXN_ornull *txnid = 0, U32 flags = 0, S
         req->uint1 = flags;
         REQ_SEND;
 }
+
+#endif
 
 
 MODULE = BDB		PACKAGE = BDB::Env
@@ -2108,6 +2134,8 @@ int set_lg_max (DB_ENV *env, U32 max)
 	OUTPUT:
         RETVAL
 
+#if DB_VERSION_MINOR >= 4
+
 int mutex_set_max (DB_ENV *env, U32 max)
         CODE:
         RETVAL = env->mutex_set_max (env, max);
@@ -2131,6 +2159,8 @@ int mutex_set_align (DB_ENV *env, U32 align)
         RETVAL = env->mutex_set_align (env, align);
         OUTPUT:
         RETVAL
+
+#endif
 
 DB_TXN *
 txn_begin (DB_ENV *env, DB_TXN_ornull *parent = 0, U32 flags = 0)
@@ -2247,6 +2277,8 @@ cursor (DB *db, DB_TXN_ornull *txn = 0, U32 flags = 0)
         OUTPUT:
         RETVAL
 
+#if DB_VERSION_MINOR >= 3
+
 DB_SEQUENCE *
 sequence (DB *db, U32 flags = 0)
 	CODE:
@@ -2257,6 +2289,8 @@ sequence (DB *db, U32 flags = 0)
 }
 	OUTPUT:
 	RETVAL
+
+#endif
 
 
 MODULE = BDB		PACKAGE = BDB::Txn
@@ -2296,6 +2330,8 @@ int set_priority (DBC *dbc, int priority)
 
 #endif
 
+#if DB_VERSION_MINOR >= 3
+
 MODULE = BDB		PACKAGE = BDB::Sequence
 
 void
@@ -2327,5 +2363,7 @@ int set_range (DB_SEQUENCE *seq, db_seq_t min, db_seq_t max)
         RETVAL = seq->set_range (seq, min, max);
 	OUTPUT:
         RETVAL
+
+#endif
 
 

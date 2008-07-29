@@ -25,8 +25,7 @@ print $! ? "not " : "", "ok 2 # $!\n";#d#
 
 my $db = db_create $env;
 
-db_open $db, undef, undef, undef, BDB::BTREE, BDB::AUTO_COMMIT | BDB::CREATE
-                                   | BDB::READ_UNCOMMITTED, 0600;
+db_open $db, undef, undef, undef, BDB::BTREE, BDB::AUTO_COMMIT | BDB::CREATE, 0600;
 
 print $! ? "not " : "", "ok 3 # $!\n";#d#
 
