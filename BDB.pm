@@ -113,7 +113,7 @@ use base 'Exporter';
 our $VERSION;
 
 BEGIN {
-   $VERSION = '1.71';
+   $VERSION = '1.8';
 
    our @BDB_REQ = qw(
       db_env_open db_env_close db_env_txn_checkpoint db_env_lock_detect
@@ -705,7 +705,7 @@ You can still queue as many requests as you want. Therefore,
 C<max_oustsanding> is mainly useful in simple scripts (with low values) or
 as a stop gap to shield against fatal memory overflow (with large values).
 
-=item BDB::set_sync_prepare $cb
+=item $old_cb = BDB::set_sync_prepare $cb
 
 Sets a callback that is called whenever a request is created without an
 explicit callback. It has to return two code references. The first is used
@@ -714,9 +714,10 @@ is called to wait until the first callback has been called (it must set
 C<$!> to the return status).
 
 This mechanism can be used to include BDB into other event mechanisms,
-such as L<AnyEvent::BDB> or L<Coro::BDB>.
+such as L<Coro::BDB>.
 
-The default implementation works like this:
+To allow other, callback-based, events to be executed while callback-less
+ones are run, you could use this sync prepare function:
 
    sub {
       my $status;
@@ -726,9 +727,13 @@ The default implementation works like this:
       )
    }
 
-It simply blocks the process till the request has finished and then sets
-C<$!> to the return value. This means that if you don't use a callback,
-BDB will simply fall back to synchronous operations.
+It works by polling for results till the request has finished and then
+sets C<$!> to the return value. This means that if you don't use a
+callback, BDB would simply fall back to synchronous operations.
+
+By default, or if the sync prepare function is set to C<undef>, is to
+execute callback-less BDB requests in the foreground thread, setting C<$!>
+to the return value, without polling for other events.
 
 =back
 
@@ -760,18 +765,7 @@ but not yet processed by poll_cb).
 
 =cut
 
-set_sync_prepare {
-   my $status;
-   (
-      sub {
-         $status = $!;
-      },
-      sub {
-         BDB::poll while !defined $status;
-         $! = $status;
-      },
-   )
-};
+set_sync_prepare (undef);
 
 min_parallel 8;
 

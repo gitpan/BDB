@@ -20,13 +20,23 @@ db_seq_t		DB_SEQ
 
 const char *		T_PV
 
+SV_mutable *		T_SV_MUTABLE
 
 INPUT
+
+T_SV_MUTABLE
+	($var) = $arg;
+        if (SvREADONLY ($var))
+          croak (\"argument \\\"%s\\\" is read-only/constant, but %s needs to write results into it\",
+                 \"$var\",
+                 \"${Package}::$func_name\")
 
 T_SV8
 	($var) = $arg;
         if (SvPOKp ($var) && !sv_utf8_downgrade ($var, 1))
-          croak (\"\\\"%s\\\" argument must be byte/octet-encoded\", \"$var\")
+          croak (\"argument \\\"%s\\\" must be byte/octet-encoded in %s\",
+                 \"$var\",
+                 \"${Package}::$func_name\")
 
 BDB_FILENAME
         ($var) = get_bdb_filename ($arg);

@@ -599,7 +599,7 @@ REQUEST ANATOMY AND LIFETIME
         values) or as a stop gap to shield against fatal memory overflow
         (with large values).
 
-    BDB::set_sync_prepare $cb
+    $old_cb = BDB::set_sync_prepare $cb
         Sets a callback that is called whenever a request is created without
         an explicit callback. It has to return two code references. The
         first is used as the request callback (it should save the return
@@ -607,9 +607,11 @@ REQUEST ANATOMY AND LIFETIME
         has been called (it must set $! to the return status).
 
         This mechanism can be used to include BDB into other event
-        mechanisms, such as AnyEvent::BDB or Coro::BDB.
+        mechanisms, such as Coro::BDB.
 
-        The default implementation works like this:
+        To allow other, callback-based, events to be executed while
+        callback-less ones are run, you could use this sync prepare
+        function:
 
            sub {
               my $status;
@@ -619,9 +621,13 @@ REQUEST ANATOMY AND LIFETIME
               )
            }
 
-        It simply blocks the process till the request has finished and then
-        sets $! to the return value. This means that if you don't use a
-        callback, BDB will simply fall back to synchronous operations.
+        It works by polling for results till the request has finished and
+        then sets $! to the return value. This means that if you don't use a
+        callback, BDB would simply fall back to synchronous operations.
+
+        By default, or if the sync prepare function is set to "undef", is to
+        execute callback-less BDB requests in the foreground thread, setting
+        $! to the return value, without polling for other events.
 
    STATISTICAL INFORMATION
     BDB::nreqs

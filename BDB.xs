@@ -1,3 +1,6 @@
+#include <sys/user.h>
+#include <sys/ptrace.h>
+
 #define X_STACKSIZE 1024 * 128 + sizeof (long) * 64 * 1024 / 4
 
 #include "xthread.h"
@@ -37,6 +40,8 @@
 
 /* number of seconds after which idle threads exit */
 #define IDLE_TIMEOUT 10
+
+typedef SV          SV_mutable;
 
 typedef DB_ENV      DB_ENV_ornull;
 typedef DB_TXN      DB_TXN_ornull;
@@ -134,7 +139,12 @@ dbt_to_sv (SV *sv, DBT *dbt)
   if (sv)
     {
       SvREADONLY_off (sv);
-      sv_setpvn_mg (sv, dbt->data, dbt->size);
+
+      if (dbt->data)
+        sv_setpvn_mg (sv, dbt->data, dbt->size);
+      else
+        sv_setsv_mg (sv, &PL_sv_undef);
+
       SvREFCNT_dec (sv);
     }
 
@@ -175,6 +185,8 @@ typedef struct bdb_cb
   DB_SEQUENCE *seq;
   db_seq_t seq_t;
 #endif
+
+  SV *rsv1, *rsv2; // keep some request objects alive
 } bdb_cb;
 
 typedef bdb_cb *bdb_req;
@@ -347,67 +359,60 @@ static void req_cancel (bdb_req req);
 
 static int req_invoke (bdb_req req)
 {
-  dSP;
+  switch (req->type)
+    {
+      case REQ_DB_CLOSE:
+        SvREFCNT_dec (req->sv1);
+        break;
+
+      case REQ_DB_GET:
+      case REQ_DB_PGET:
+      case REQ_C_GET:
+      case REQ_C_PGET:
+      case REQ_DB_PUT:
+      case REQ_C_PUT:
+        dbt_to_sv (req->sv1, &req->dbt1);
+        dbt_to_sv (req->sv2, &req->dbt2);
+        dbt_to_sv (req->sv3, &req->dbt3);
+        break;
+
+      case REQ_DB_KEY_RANGE:
+        {
+          AV *av = newAV ();
+
+          av_push (av, newSVnv (req->key_range.less));
+          av_push (av, newSVnv (req->key_range.equal));
+          av_push (av, newSVnv (req->key_range.greater));
+
+          SvREADONLY_off (req->sv1);
+          sv_setsv_mg (req->sv1, newRV_noinc ((SV *)av));
+          SvREFCNT_dec (req->sv1);
+        }
+        break;
+
+#if DB_VERSION_MINOR >= 3
+      case REQ_SEQ_GET:
+        SvREADONLY_off (req->sv1);
+
+        if (sizeof (IV) > 4)
+          sv_setiv_mg (req->sv1, (IV)req->seq_t);
+        else
+          sv_setnv_mg (req->sv1, (NV)req->seq_t);
+
+        SvREFCNT_dec (req->sv1);
+        break;
+#endif
+    }
+
+  errno = req->result;
 
   if (req->callback)
     {
+      dSP;
+
       ENTER;
       SAVETMPS;
       PUSHMARK (SP);
-
-      switch (req->type)
-        {
-          case REQ_DB_CLOSE:
-            SvREFCNT_dec (req->sv1);
-            break;
-
-          case REQ_DB_GET:
-          case REQ_DB_PGET:
-            dbt_to_sv (req->sv3, &req->dbt3);
-            break;
-
-          case REQ_C_GET:
-          case REQ_C_PGET:
-            dbt_to_sv (req->sv1, &req->dbt1);
-            dbt_to_sv (req->sv2, &req->dbt2);
-            dbt_to_sv (req->sv3, &req->dbt3);
-            break;
-
-          case REQ_DB_PUT:
-          case REQ_C_PUT:
-            dbt_to_sv (0, &req->dbt1);
-            dbt_to_sv (0, &req->dbt2);
-            break;
-
-          case REQ_DB_KEY_RANGE:
-            {
-              AV *av = newAV ();
-
-              av_push (av, newSVnv (req->key_range.less));
-              av_push (av, newSVnv (req->key_range.equal));
-              av_push (av, newSVnv (req->key_range.greater));
-
-              SvREADONLY_off (req->sv1);
-              sv_setsv_mg (req->sv1, newRV_noinc ((SV *)av));
-              SvREFCNT_dec (req->sv1);
-            }
-            break;
-
-#if DB_VERSION_MINOR >= 3
-          case REQ_SEQ_GET:
-            SvREADONLY_off (req->sv1);
-
-            if (sizeof (IV) > 4)
-              sv_setiv_mg (req->sv1, (IV)req->seq_t);
-            else
-              sv_setnv_mg (req->sv1, (NV)req->seq_t);
-
-            SvREFCNT_dec (req->sv1);
-            break;
-#endif
-        }
-
-      errno = req->result;
 
       PUTBACK;
       call_sv (req->callback, G_VOID | G_EVAL);
@@ -415,14 +420,19 @@ static int req_invoke (bdb_req req)
 
       FREETMPS;
       LEAVE;
+
+      return !SvTRUE (ERRSV);
     }
 
-  return !SvTRUE (ERRSV);
+  return 1;
 }
 
 static void req_free (bdb_req req)
 {
   SvREFCNT_dec (req->callback);
+
+  SvREFCNT_dec (req->rsv1);
+  SvREFCNT_dec (req->rsv2);
 
   free (req->buf1);
   free (req->buf2);
@@ -478,6 +488,7 @@ create_respipe (void)
   respipe_osf [1] = TO_SOCKET (respipe [1]);
 }
 
+static void bdb_request (bdb_req req);
 X_THREAD_PROC (bdb_proc);
 
 static void start_thread (void)
@@ -528,25 +539,36 @@ static void req_send (bdb_req req)
       PUSHMARK (SP);
       PUTBACK;
       call_sv (cb, G_DISCARD | G_EVAL);
+      SPAGAIN;
     }
 
   // synthesize callback if none given
   if (!req->callback)
     {
-      int count;
+      if (SvOK (prepare_cb))
+        {
+          int count;
 
-      dSP;
-      PUSHMARK (SP);
-      PUTBACK;
-      count = call_sv (prepare_cb, G_ARRAY);
-      SPAGAIN;
+          dSP;
+          PUSHMARK (SP);
+          PUTBACK;
+          count = call_sv (prepare_cb, G_ARRAY);
+          SPAGAIN;
 
-      if (count != 2)
-        croak ("prepare callback must return exactly two values\n");
+          if (count != 2)
+            croak ("sync prepare callback must return exactly two values\n");
 
-      wait_callback = POPs;
-      SvREFCNT_dec (req->callback);
-      req->callback = SvREFCNT_inc (POPs);
+          wait_callback = POPs;
+          req->callback = SvREFCNT_inc (POPs);
+        }
+      else
+        {
+          // execute request synchronously
+          bdb_request (req);
+          req_invoke (req);
+          req_free (req);
+          return;
+        }
     }
 
   ++nreqs;
@@ -570,9 +592,7 @@ static void req_send (bdb_req req)
 
 static void end_thread (void)
 {
-  bdb_req req;
-
-  Newz (0, req, 1, bdb_cb);
+  bdb_req req = calloc (1, sizeof (bdb_cb));
 
   req->type = REQ_QUIT;
   req->pri  = PRI_MAX + PRI_BIAS;
@@ -708,6 +728,164 @@ static int poll_cb (void)
 
 /*****************************************************************************/
 
+static void
+bdb_request (bdb_req req)
+{
+  switch (req->type)
+    {
+      case REQ_ENV_OPEN:
+        req->result = req->env->open (req->env, req->buf1, req->uint1, req->int1);
+        break;
+
+      case REQ_ENV_CLOSE:
+        req->result = req->env->close (req->env, req->uint1);
+        break;
+
+      case REQ_ENV_TXN_CHECKPOINT:
+        req->result = req->env->txn_checkpoint (req->env, req->uint1, req->int1, req->uint2);
+        break;
+
+      case REQ_ENV_LOCK_DETECT:
+        req->result = req->env->lock_detect (req->env, req->uint1, req->uint2, &req->int1);
+        break;
+
+      case REQ_ENV_MEMP_SYNC:
+        req->result = req->env->memp_sync (req->env, 0);
+        break;
+
+      case REQ_ENV_MEMP_TRICKLE:
+        req->result = req->env->memp_trickle (req->env, req->int1, &req->int2);
+        break;
+
+      case REQ_ENV_DBREMOVE:
+        req->result = req->env->dbremove (req->env, req->txn, req->buf1, req->buf2, req->uint1);
+        break;
+
+      case REQ_ENV_DBRENAME:
+        req->result = req->env->dbrename (req->env, req->txn, req->buf1, req->buf2, req->buf3, req->uint1);
+        break;
+
+      case REQ_DB_OPEN:
+        req->result = req->db->open (req->db, req->txn, req->buf1, req->buf2, req->int1, req->uint1, req->int2);
+        break;
+
+      case REQ_DB_CLOSE:
+        req->result = req->db->close (req->db, req->uint1);
+        break;
+
+#if DB_VERSION_MINOR >= 4
+      case REQ_DB_COMPACT:
+        req->result = req->db->compact (req->db, req->txn, &req->dbt1, &req->dbt2, 0, req->uint1, 0);
+        break;
+#endif
+
+      case REQ_DB_SYNC:
+        req->result = req->db->sync (req->db, req->uint1);
+        break;
+
+      case REQ_DB_UPGRADE:
+        req->result = req->db->upgrade (req->db, req->buf1, req->uint1);
+        break;
+
+      case REQ_DB_PUT:
+        req->result = req->db->put (req->db, req->txn, &req->dbt1, &req->dbt2, req->uint1);
+        break;
+
+#if DB_VERSION_MINOR >= 6
+      case REQ_DB_EXISTS:
+        req->result = req->db->exists (req->db, req->txn, &req->dbt1, req->uint1);
+        break;
+#endif
+      case REQ_DB_GET:
+        req->result = req->db->get (req->db, req->txn, &req->dbt1, &req->dbt3, req->uint1);
+        break;
+
+      case REQ_DB_PGET:
+        req->result = req->db->pget (req->db, req->txn, &req->dbt1, &req->dbt2, &req->dbt3, req->uint1);
+        break;
+
+      case REQ_DB_DEL:
+        req->result = req->db->del (req->db, req->txn, &req->dbt1, req->uint1);
+        break;
+
+      case REQ_DB_KEY_RANGE:
+        req->result = req->db->key_range (req->db, req->txn, &req->dbt1, &req->key_range, req->uint1);
+        break;
+
+      case REQ_TXN_COMMIT:
+        req->result = req->txn->commit (req->txn, req->uint1);
+        break;
+
+      case REQ_TXN_ABORT:
+        req->result = req->txn->abort (req->txn);
+        break;
+
+      case REQ_TXN_FINISH:
+        if (req->txn->flags & TXN_DEADLOCK)
+          {
+            req->result = req->txn->abort (req->txn);
+            if (!req->result)
+              req->result = DB_LOCK_DEADLOCK;
+          }
+        else
+          req->result = req->txn->commit (req->txn, req->uint1);
+        break;
+
+      case REQ_C_CLOSE:
+        req->result = req->dbc->c_close (req->dbc);
+        break;
+
+      case REQ_C_COUNT:
+        {
+          db_recno_t recno;
+          req->result = req->dbc->c_count (req->dbc, &recno, req->uint1);
+          req->uv1 = recno;
+        }
+        break;
+
+      case REQ_C_PUT:
+        req->result = req->dbc->c_put (req->dbc, &req->dbt1, &req->dbt2, req->uint1);
+        break;
+
+      case REQ_C_GET:
+        req->result = req->dbc->c_get (req->dbc, &req->dbt1, &req->dbt3, req->uint1);
+        break;
+
+      case REQ_C_PGET:
+        req->result = req->dbc->c_pget (req->dbc, &req->dbt1, &req->dbt2, &req->dbt3, req->uint1);
+        break;
+
+      case REQ_C_DEL:
+        req->result = req->dbc->c_del (req->dbc, req->uint1);
+        break;
+
+#if DB_VERSION_MINOR >= 3
+      case REQ_SEQ_OPEN:
+        req->result = req->seq->open (req->seq, req->txn, &req->dbt1, req->uint1);
+        break;
+
+      case REQ_SEQ_CLOSE:
+        req->result = req->seq->close (req->seq, req->uint1);
+        break;
+
+      case REQ_SEQ_GET:
+        req->result = req->seq->get (req->seq, req->txn, req->int1, &req->seq_t, req->uint1);
+        break;
+
+      case REQ_SEQ_REMOVE:
+        req->result = req->seq->remove (req->seq, req->txn, req->uint1);
+        break;
+#endif
+
+      default:
+        req->result = ENOSYS;
+        break;
+    }
+
+  if (req->txn && (req->result > 0 || req->result == DB_LOCK_NOTGRANTED))
+    req->txn->flags |= TXN_DEADLOCK;
+}
+
 X_THREAD_PROC (bdb_proc)
 {
   bdb_req req;
@@ -756,164 +934,18 @@ X_THREAD_PROC (bdb_proc)
       --nready;
 
       X_UNLOCK (reqlock);
-     
-      switch (req->type)
+
+      if (req->type == REQ_QUIT)
         {
-          case REQ_QUIT:
-            req->result = ENOSYS;
-            goto quit;
+          X_LOCK (reslock);
+          free (req);
+          self->req = 0;
+          X_UNLOCK (reslock);
 
-          case REQ_ENV_OPEN:
-            req->result = req->env->open (req->env, req->buf1, req->uint1, req->int1);
-            break;
-
-          case REQ_ENV_CLOSE:
-            req->result = req->env->close (req->env, req->uint1);
-            break;
-
-          case REQ_ENV_TXN_CHECKPOINT:
-            req->result = req->env->txn_checkpoint (req->env, req->uint1, req->int1, req->uint2);
-            break;
-
-          case REQ_ENV_LOCK_DETECT:
-            req->result = req->env->lock_detect (req->env, req->uint1, req->uint2, &req->int1);
-            break;
-
-          case REQ_ENV_MEMP_SYNC:
-            req->result = req->env->memp_sync (req->env, 0);
-            break;
-
-          case REQ_ENV_MEMP_TRICKLE:
-            req->result = req->env->memp_trickle (req->env, req->int1, &req->int2);
-            break;
-
-          case REQ_ENV_DBREMOVE:
-            req->result = req->env->dbremove (req->env, req->txn, req->buf1, req->buf2, req->uint1);
-            break;
-
-          case REQ_ENV_DBRENAME:
-            req->result = req->env->dbrename (req->env, req->txn, req->buf1, req->buf2, req->buf3, req->uint1);
-            break;
-
-          case REQ_DB_OPEN:
-            req->result = req->db->open (req->db, req->txn, req->buf1, req->buf2, req->int1, req->uint1, req->int2);
-            break;
-
-          case REQ_DB_CLOSE:
-            req->result = req->db->close (req->db, req->uint1);
-            break;
-
-#if DB_VERSION_MINOR >= 4
-          case REQ_DB_COMPACT:
-            req->result = req->db->compact (req->db, req->txn, &req->dbt1, &req->dbt2, 0, req->uint1, 0);
-            break;
-#endif
-
-          case REQ_DB_SYNC:
-            req->result = req->db->sync (req->db, req->uint1);
-            break;
-
-          case REQ_DB_UPGRADE:
-            req->result = req->db->upgrade (req->db, req->buf1, req->uint1);
-            break;
-
-          case REQ_DB_PUT:
-            req->result = req->db->put (req->db, req->txn, &req->dbt1, &req->dbt2, req->uint1);
-            break;
-
-#if DB_VERSION_MINOR >= 6
-          case REQ_DB_EXISTS:
-            req->result = req->db->exists (req->db, req->txn, &req->dbt1, req->uint1);
-            break;
-#endif
-          case REQ_DB_GET:
-            req->result = req->db->get (req->db, req->txn, &req->dbt1, &req->dbt3, req->uint1);
-            break;
-
-          case REQ_DB_PGET:
-            req->result = req->db->pget (req->db, req->txn, &req->dbt1, &req->dbt2, &req->dbt3, req->uint1);
-            break;
-
-          case REQ_DB_DEL:
-            req->result = req->db->del (req->db, req->txn, &req->dbt1, req->uint1);
-            break;
-
-          case REQ_DB_KEY_RANGE:
-            req->result = req->db->key_range (req->db, req->txn, &req->dbt1, &req->key_range, req->uint1);
-            break;
-
-          case REQ_TXN_COMMIT:
-            req->result = req->txn->commit (req->txn, req->uint1);
-            break;
-
-          case REQ_TXN_ABORT:
-            req->result = req->txn->abort (req->txn);
-            break;
-
-          case REQ_TXN_FINISH:
-            if (req->txn->flags & TXN_DEADLOCK)
-              {
-                req->result = req->txn->abort (req->txn);
-                if (!req->result)
-                  req->result = DB_LOCK_DEADLOCK;
-              }
-            else
-              req->result = req->txn->commit (req->txn, req->uint1);
-            break;
-
-          case REQ_C_CLOSE:
-            req->result = req->dbc->c_close (req->dbc);
-            break;
-
-          case REQ_C_COUNT:
-            {
-              db_recno_t recno;
-              req->result = req->dbc->c_count (req->dbc, &recno, req->uint1);
-              req->uv1 = recno;
-            }
-            break;
-
-          case REQ_C_PUT:
-            req->result = req->dbc->c_put (req->dbc, &req->dbt1, &req->dbt2, req->uint1);
-            break;
-
-          case REQ_C_GET:
-            req->result = req->dbc->c_get (req->dbc, &req->dbt1, &req->dbt3, req->uint1);
-            break;
-
-          case REQ_C_PGET:
-            req->result = req->dbc->c_pget (req->dbc, &req->dbt1, &req->dbt2, &req->dbt3, req->uint1);
-            break;
-
-          case REQ_C_DEL:
-            req->result = req->dbc->c_del (req->dbc, req->uint1);
-            break;
-
-#if DB_VERSION_MINOR >= 3
-          case REQ_SEQ_OPEN:
-            req->result = req->seq->open (req->seq, req->txn, &req->dbt1, req->uint1);
-            break;
-
-          case REQ_SEQ_CLOSE:
-            req->result = req->seq->close (req->seq, req->uint1);
-            break;
-
-          case REQ_SEQ_GET:
-            req->result = req->seq->get (req->seq, req->txn, req->int1, &req->seq_t, req->uint1);
-            break;
-
-          case REQ_SEQ_REMOVE:
-            req->result = req->seq->remove (req->seq, req->txn, req->uint1);
-            break;
-#endif
-
-          default:
-            req->result = ENOSYS;
-            break;
+          goto quit;
         }
 
-      if (req->txn && (req->result > 0 || req->result == DB_LOCK_NOTGRANTED))
-        req->txn->flags |= TXN_DEADLOCK;
+      bdb_request (req);
 
       X_LOCK (reslock);
 
@@ -985,7 +1017,7 @@ static void atfork_child (void)
   atfork_parent ();
 }
 
-#define dREQ(reqtype)						\
+#define dREQ(reqtype,rsvcnt)					\
   bdb_req req;							\
   int req_pri = next_pri;					\
   next_pri = DEFAULT_PRI + PRI_BIAS;				\
@@ -997,9 +1029,12 @@ static void atfork_child (void)
   if (!req)							\
     croak ("out of memory during bdb_req allocation");		\
 								\
-  req->callback = cb ? SvREFCNT_inc (cb) : 0;			\
+  req->callback = SvREFCNT_inc (cb);				\
   req->type = (reqtype); 					\
-  req->pri = req_pri
+  req->pri  = req_pri;						\
+  if (rsvcnt >= 1) req->rsv1 = SvREFCNT_inc (ST (0));		\
+  if (rsvcnt >= 2) req->rsv2 = SvREFCNT_inc (ST (1));		\
+  (void)0;
 
 #define REQ_SEND						\
   req_send (req)
@@ -1016,11 +1051,15 @@ static void atfork_child (void)
     {                                                           		\
       IV tmp = SvIV ((SV*) SvRV (arg));                         		\
       (var) = INT2PTR (type, tmp);                              		\
-      if (!var && nullok != 2)									\
+      if (!var && nullok != 2)							\
         croak (# var " is not a valid " # class " object anymore");		\
     }                                                           		\
   else                                                          		\
     croak (# var " is not of type " # class);
+
+#define ARG_MUTABLE(name)							\
+  if (SvREADONLY (name))							\
+    croak ("argument " #name " is read-only/constant, but the request requires it to be mutable");
 
 static void
 ptr_nuke (SV *sv)
@@ -1308,6 +1347,8 @@ BOOT:
         for (civ = const_iv + sizeof (const_iv) / sizeof (const_iv [0]); civ-- > const_iv; )
           newCONSTSUB (stash, (char *)civ->name, newSViv (civ->iv));
 
+        prepare_cb = &PL_sv_undef;
+
         {
           /* we currently only allow version, minor-version and patchlevel to go up to 255 */
           char vstring[3] = { DB_VERSION_MAJOR, DB_VERSION_MINOR, DB_VERSION_PATCH };
@@ -1455,12 +1496,14 @@ nthreads ()
 	OUTPUT:
 	RETVAL
 
-void
+SV *
 set_sync_prepare (SV *cb)
 	PROTOTYPE: &
 	CODE:
-        SvREFCNT_dec (prepare_cb);
+        RETVAL = prepare_cb;
         prepare_cb = newSVsv (cb);
+	OUTPUT:
+        RETVAL
 
 char *
 strerror (int errorno = errno)
@@ -1498,7 +1541,7 @@ db_env_open (DB_ENV *env, bdb_filename db_home, U32 open_flags, int mode, SV *ca
         CALLBACK
 	CODE:
 {
-        dREQ (REQ_ENV_OPEN);
+        dREQ (REQ_ENV_OPEN, 1);
         req->env   = env;
         req->uint1 = open_flags | DB_THREAD;
         req->int1  = mode;
@@ -1512,11 +1555,11 @@ db_env_close (DB_ENV *env, U32 flags = 0, SV *callback = 0)
         CALLBACK
 	CODE:
 {
-	dREQ (REQ_ENV_CLOSE);
+        ptr_nuke (ST (0));
+	dREQ (REQ_ENV_CLOSE, 0);
         req->env   = env;
         req->uint1 = flags;
         REQ_SEND;
-        ptr_nuke (ST (0));
 }
 
 void
@@ -1525,7 +1568,7 @@ db_env_txn_checkpoint (DB_ENV *env, U32 kbyte = 0, U32 min = 0, U32 flags = 0, S
         CALLBACK
 	CODE:
 {
-        dREQ (REQ_ENV_TXN_CHECKPOINT);
+        dREQ (REQ_ENV_TXN_CHECKPOINT, 1);
         req->env   = env;
         req->uint1 = kbyte;
         req->int1  = min;
@@ -1539,7 +1582,7 @@ db_env_lock_detect (DB_ENV *env, U32 flags = 0, U32 atype = DB_LOCK_DEFAULT, SV 
         CALLBACK
 	CODE:
 {
-        dREQ (REQ_ENV_LOCK_DETECT);
+        dREQ (REQ_ENV_LOCK_DETECT, 1);
         req->env   = env;
         req->uint1 = flags;
         req->uint2 = atype;
@@ -1553,7 +1596,7 @@ db_env_memp_sync (DB_ENV *env, SV *dummy = 0, SV *callback = 0)
         CALLBACK
 	CODE:
 {
-        dREQ (REQ_ENV_MEMP_SYNC);
+        dREQ (REQ_ENV_MEMP_SYNC, 1);
         req->env  = env;
         REQ_SEND;
 }
@@ -1564,7 +1607,7 @@ db_env_memp_trickle (DB_ENV *env, int percent, SV *dummy = 0, SV *callback = 0)
         CALLBACK
 	CODE:
 {
-        dREQ (REQ_ENV_MEMP_TRICKLE);
+        dREQ (REQ_ENV_MEMP_TRICKLE, 1);
         req->env  = env;
         req->int1 = percent;
         REQ_SEND;
@@ -1576,7 +1619,7 @@ db_env_dbremove (DB_ENV *env, DB_TXN_ornull *txnid, bdb_filename file, bdb_filen
         CALLBACK
 	CODE:
 {
-	dREQ (REQ_ENV_DBREMOVE);
+	dREQ (REQ_ENV_DBREMOVE, 2);
         req->env   = env;
         req->buf1  = strdup_ornull (file);
         req->buf2  = strdup_ornull (database);
@@ -1590,7 +1633,7 @@ db_env_dbrename (DB_ENV *env, DB_TXN_ornull *txnid, bdb_filename file, bdb_filen
         CALLBACK
 	CODE:
 {
-	dREQ (REQ_ENV_DBRENAME);
+	dREQ (REQ_ENV_DBRENAME, 2);
         req->env   = env;
         req->buf1  = strdup_ornull (file);
         req->buf2  = strdup_ornull (database);
@@ -1619,7 +1662,7 @@ db_open (DB *db, DB_TXN_ornull *txnid, bdb_filename file, bdb_filename database,
         CALLBACK
 	CODE:
 {
-        dREQ (REQ_DB_OPEN);
+        dREQ (REQ_DB_OPEN, 2);
         req->db    = db;
         req->txn   = txnid;
         req->buf1  = strdup_ornull (file);
@@ -1636,12 +1679,12 @@ db_close (DB *db, U32 flags = 0, SV *callback = 0)
         CALLBACK
 	CODE:
 {
-        dREQ (REQ_DB_CLOSE);
+        ptr_nuke (ST (0));
+        dREQ (REQ_DB_CLOSE, 0);
         req->db    = db;
         req->uint1 = flags;
         req->sv1   = (SV *)db->app_private;
         REQ_SEND;
-        ptr_nuke (ST (0));
 }
 
 #if DB_VERSION_MINOR >= 4
@@ -1652,7 +1695,7 @@ db_compact (DB *db, DB_TXN_ornull *txn = 0, SV *start = 0, SV *stop = 0, SV *unu
         CALLBACK
 	CODE:
 {
-        dREQ (REQ_DB_COMPACT);
+        dREQ (REQ_DB_COMPACT, 2);
         req->db    = db;
         req->txn   = txn;
         sv_to_dbt (&req->dbt1, start);
@@ -1669,7 +1712,7 @@ db_sync (DB *db, U32 flags = 0, SV *callback = 0)
         CALLBACK
 	CODE:
 {
-        dREQ (REQ_DB_SYNC);
+        dREQ (REQ_DB_SYNC, 1);
         req->db    = db;
         req->uint1 = flags;
         REQ_SEND;
@@ -1681,7 +1724,7 @@ db_upgrade (DB *db, bdb_filename file, U32 flags = 0, SV *callback = 0)
         CALLBACK
 	CODE:
 {
-        dREQ (REQ_DB_SYNC);
+        dREQ (REQ_DB_SYNC, 1);
         req->db    = db;
         req->buf1  = strdup (file);
         req->uint1 = flags;
@@ -1689,12 +1732,12 @@ db_upgrade (DB *db, bdb_filename file, U32 flags = 0, SV *callback = 0)
 }
 
 void
-db_key_range (DB *db, DB_TXN_ornull *txn, SV *key, SV *key_range, U32 flags = 0, SV *callback = 0)
+db_key_range (DB *db, DB_TXN_ornull *txn, SV *key, SV_mutable *key_range, U32 flags = 0, SV *callback = 0)
 	PREINIT:
         CALLBACK
 	CODE:
 {
-        dREQ (REQ_DB_KEY_RANGE);
+        dREQ (REQ_DB_KEY_RANGE, 2);
         req->db    = db;
         req->txn   = txn;
         sv_to_dbt (&req->dbt1, key);
@@ -1709,7 +1752,7 @@ db_put (DB *db, DB_TXN_ornull *txn, SV *key, SV *data, U32 flags = 0, SV *callba
         CALLBACK
 	CODE:
 {
-        dREQ (REQ_DB_PUT);
+        dREQ (REQ_DB_PUT, 2);
         req->db    = db;
         req->txn   = txn;
         sv_to_dbt (&req->dbt1, key);
@@ -1726,7 +1769,7 @@ db_exists (DB *db, DB_TXN_ornull *txn, SV *key, U32 flags = 0, SV *callback = 0)
         CALLBACK
 	CODE:
 {
-        dREQ (REQ_DB_EXISTS);
+        dREQ (REQ_DB_EXISTS, 2);
         req->db    = db;
         req->txn   = txn;
         req->uint1 = flags;
@@ -1737,14 +1780,13 @@ db_exists (DB *db, DB_TXN_ornull *txn, SV *key, U32 flags = 0, SV *callback = 0)
 #endif
 
 void
-db_get (DB *db, DB_TXN_ornull *txn, SV *key, SV *data, U32 flags = 0, SV *callback = 0)
+db_get (DB *db, DB_TXN_ornull *txn, SV *key, SV_mutable *data, U32 flags = 0, SV *callback = 0)
 	PREINIT:
         CALLBACK
 	CODE:
-        if (SvREADONLY (data))
-          croak ("can't modify read-only data scalar in db_get");
 {
-        dREQ (REQ_DB_GET);
+	//TODO: key is somtimesmutable
+        dREQ (REQ_DB_GET, 2);
         req->db    = db;
         req->txn   = txn;
         req->uint1 = flags;
@@ -1755,19 +1797,22 @@ db_get (DB *db, DB_TXN_ornull *txn, SV *key, SV *data, U32 flags = 0, SV *callba
 }
 
 void
-db_pget (DB *db, DB_TXN_ornull *txn, SV *key, SV *pkey, SV *data, U32 flags = 0, SV *callback = 0)
+db_pget (DB *db, DB_TXN_ornull *txn, SV *key, SV_mutable *pkey, SV_mutable *data, U32 flags = 0, SV *callback = 0)
 	PREINIT:
         CALLBACK
 	CODE:
-        if (SvREADONLY (data))
-          croak ("can't modify read-only data scalar in db_pget");
 {
-        dREQ (REQ_DB_PGET);
+	//TODO: key is somtimesmutable
+        dREQ (REQ_DB_PGET, 2);
         req->db    = db;
         req->txn   = txn;
         req->uint1 = flags;
+
         sv_to_dbt (&req->dbt1, key);
-        sv_to_dbt (&req->dbt2, pkey);
+
+        req->dbt2.flags = DB_DBT_MALLOC;
+        req->sv2 = SvREFCNT_inc (pkey); SvREADONLY_on (pkey);
+
         req->dbt3.flags = DB_DBT_MALLOC;
         req->sv3 = SvREFCNT_inc (data); SvREADONLY_on (data);
         REQ_SEND;
@@ -1779,7 +1824,7 @@ db_del (DB *db, DB_TXN_ornull *txn, SV *key, U32 flags = 0, SV *callback = 0)
         CALLBACK
 	CODE:
 {
-        dREQ (REQ_DB_DEL);
+        dREQ (REQ_DB_DEL, 2);
         req->db    = db;
         req->txn   = txn;
         req->uint1 = flags;
@@ -1793,11 +1838,11 @@ db_txn_commit (DB_TXN *txn, U32 flags = 0, SV *callback = 0)
         CALLBACK
 	CODE:
 {
-        dREQ (REQ_TXN_COMMIT);
+        ptr_nuke (ST (0));
+        dREQ (REQ_TXN_COMMIT, 0);
         req->txn   = txn;
         req->uint1 = flags;
         REQ_SEND;
-        ptr_nuke (ST (0));
 }
 
 void
@@ -1806,10 +1851,10 @@ db_txn_abort (DB_TXN *txn, SV *callback = 0)
         CALLBACK
 	CODE:
 {
-        dREQ (REQ_TXN_ABORT);
+        ptr_nuke (ST (0));
+        dREQ (REQ_TXN_ABORT, 0);
         req->txn   = txn;
         REQ_SEND;
-        ptr_nuke (ST (0));
 }
 
 void
@@ -1818,11 +1863,11 @@ db_txn_finish (DB_TXN *txn, U32 flags = 0, SV *callback = 0)
         CALLBACK
 	CODE:
 {
-        dREQ (REQ_TXN_FINISH);
+        ptr_nuke (ST (0));
+        dREQ (REQ_TXN_FINISH, 0);
         req->txn   = txn;
         req->uint1 = flags;
         REQ_SEND;
-        ptr_nuke (ST (0));
 }
 
 void
@@ -1831,10 +1876,10 @@ db_c_close (DBC *dbc, SV *callback = 0)
         CALLBACK
 	CODE:
 {
-        dREQ (REQ_C_CLOSE);
+        ptr_nuke (ST (0));
+        dREQ (REQ_C_CLOSE, 0);
         req->dbc = dbc;
         REQ_SEND;
-        ptr_nuke (ST (0));
 }
 
 void
@@ -1843,7 +1888,7 @@ db_c_count (DBC *dbc, SV *count, U32 flags = 0, SV *callback = 0)
         CALLBACK
 	CODE:
 {
-        dREQ (REQ_C_COUNT);
+        dREQ (REQ_C_COUNT, 1);
         req->dbc = dbc;
         req->sv1 = SvREFCNT_inc (count);
         REQ_SEND;
@@ -1855,7 +1900,7 @@ db_c_put (DBC *dbc, SV *key, SV *data, U32 flags = 0, SV *callback = 0)
         CALLBACK
 	CODE:
 {
-        dREQ (REQ_C_PUT);
+        dREQ (REQ_C_PUT, 1);
         req->dbc   = dbc;
         sv_to_dbt (&req->dbt1, key);
         sv_to_dbt (&req->dbt2, data);
@@ -1864,24 +1909,31 @@ db_c_put (DBC *dbc, SV *key, SV *data, U32 flags = 0, SV *callback = 0)
 }
 
 void
-db_c_get (DBC *dbc, SV *key, SV *data, U32 flags = 0, SV *callback = 0)
+db_c_get (DBC *dbc, SV *key, SV_mutable *data, U32 flags = 0, SV *callback = 0)
 	PREINIT:
         CALLBACK
 	CODE:
 {
-        dREQ (REQ_C_GET);
+        if (flags & DB_OPFLAGS_MASK != DB_SET && SvREADONLY (key))
+          croak ("db_c_get was passed a read-only/constant 'key' argument but operation is not DB_SET");
+
+        dREQ (REQ_C_GET, 1);
         req->dbc   = dbc;
         req->uint1 = flags;
-        if ((flags & DB_SET) == DB_SET
-            || (flags & DB_SET_RANGE) == DB_SET_RANGE)
+        if (flags & DB_OPFLAGS_MASK == DB_SET)
           sv_to_dbt (&req->dbt1, key);
         else
-          req->dbt1.flags = DB_DBT_MALLOC;
+          {
+            if (flags & DB_OPFLAGS_MASK == DB_SET_RANGE)
+              sv_to_dbt (&req->dbt1, key);
+            else
+              req->dbt1.flags = DB_DBT_MALLOC;
 
-        req->sv1 = SvREFCNT_inc (key); SvREADONLY_on (key);
+            req->sv1 = SvREFCNT_inc (key); SvREADONLY_on (key);
+          }
 
-        if ((flags & DB_GET_BOTH) == DB_GET_BOTH
-            || (flags & DB_GET_BOTH_RANGE) == DB_GET_BOTH_RANGE)
+        if (flags & DB_OPFLAGS_MASK == DB_GET_BOTH
+            || flags & DB_OPFLAGS_MASK == DB_GET_BOTH_RANGE)
           sv_to_dbt (&req->dbt3, data);
         else
           req->dbt3.flags = DB_DBT_MALLOC;
@@ -1891,27 +1943,34 @@ db_c_get (DBC *dbc, SV *key, SV *data, U32 flags = 0, SV *callback = 0)
 }
 
 void
-db_c_pget (DBC *dbc, SV *key, SV *pkey, SV *data, U32 flags = 0, SV *callback = 0)
+db_c_pget (DBC *dbc, SV *key, SV_mutable *pkey, SV_mutable *data, U32 flags = 0, SV *callback = 0)
 	PREINIT:
         CALLBACK
 	CODE:
 {
-        dREQ (REQ_C_PGET);
+        if (flags & DB_OPFLAGS_MASK != DB_SET && SvREADONLY (key))
+          croak ("db_c_pget was passed a read-only/constant 'key' argument but operation is not DB_SET");
+
+        dREQ (REQ_C_PGET, 1);
         req->dbc   = dbc;
         req->uint1 = flags;
-        if ((flags & DB_SET) == DB_SET
-            || (flags & DB_SET_RANGE) == DB_SET_RANGE)
+        if (flags & DB_OPFLAGS_MASK == DB_SET)
           sv_to_dbt (&req->dbt1, key);
         else
-          req->dbt1.flags = DB_DBT_MALLOC;
+          {
+            if (flags & DB_OPFLAGS_MASK == DB_SET_RANGE)
+              sv_to_dbt (&req->dbt1, key);
+            else
+              req->dbt1.flags = DB_DBT_MALLOC;
 
-        req->sv1 = SvREFCNT_inc (key); SvREADONLY_on (key);
+            req->sv1 = SvREFCNT_inc (key); SvREADONLY_on (key);
+          }
 
         req->dbt2.flags = DB_DBT_MALLOC;
         req->sv2 = SvREFCNT_inc (pkey); SvREADONLY_on (pkey);
 
-        if ((flags & DB_GET_BOTH) == DB_GET_BOTH
-            || (flags & DB_GET_BOTH_RANGE) == DB_GET_BOTH_RANGE)
+        if (flags & DB_OPFLAGS_MASK == DB_GET_BOTH
+            || flags & DB_OPFLAGS_MASK == DB_GET_BOTH_RANGE)
           sv_to_dbt (&req->dbt3, data);
         else
           req->dbt3.flags = DB_DBT_MALLOC;
@@ -1926,7 +1985,7 @@ db_c_del (DBC *dbc, U32 flags = 0, SV *callback = 0)
         CALLBACK
 	CODE:
 {
-        dREQ (REQ_C_DEL);
+        dREQ (REQ_C_DEL, 1);
         req->dbc   = dbc;
         req->uint1 = flags;
         REQ_SEND;
@@ -1941,7 +2000,7 @@ db_sequence_open (DB_SEQUENCE *seq, DB_TXN_ornull *txnid, SV *key, U32 flags = 0
         CALLBACK
 	CODE:
 {
-        dREQ (REQ_SEQ_OPEN);
+        dREQ (REQ_SEQ_OPEN, 2);
         req->seq   = seq;
         req->txn   = txnid;
         req->uint1 = flags | DB_THREAD;
@@ -1955,20 +2014,20 @@ db_sequence_close (DB_SEQUENCE *seq, U32 flags = 0, SV *callback = 0)
         CALLBACK
 	CODE:
 {
-        dREQ (REQ_SEQ_CLOSE);
+        ptr_nuke (ST (0));
+        dREQ (REQ_SEQ_CLOSE, 0);
         req->seq   = seq;
         req->uint1 = flags;
         REQ_SEND;
-        ptr_nuke (ST (0));
 }
 
 void
-db_sequence_get (DB_SEQUENCE *seq, DB_TXN_ornull *txnid, int delta, SV *seq_value, U32 flags = DB_TXN_NOSYNC, SV *callback = 0)
+db_sequence_get (DB_SEQUENCE *seq, DB_TXN_ornull *txnid, int delta, SV_mutable *seq_value, U32 flags = DB_TXN_NOSYNC, SV *callback = 0)
 	PREINIT:
         CALLBACK
 	CODE:
 {
-        dREQ (REQ_SEQ_GET);
+        dREQ (REQ_SEQ_GET, 2);
         req->seq   = seq;
         req->txn   = txnid;
         req->int1  = delta;
@@ -1983,7 +2042,7 @@ db_sequence_remove (DB_SEQUENCE *seq, DB_TXN_ornull *txnid = 0, U32 flags = 0, S
         CALLBACK
 	CODE:
 {
-        dREQ (REQ_SEQ_REMOVE);
+        dREQ (REQ_SEQ_REMOVE, 2);
         req->seq   = seq;
         req->txn   = txnid;
         req->uint1 = flags;
