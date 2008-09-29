@@ -1,6 +1,3 @@
-#include <sys/user.h>
-#include <sys/ptrace.h>
-
 #define X_STACKSIZE 1024 * 128 + sizeof (long) * 64 * 1024 / 4
 
 #include "xthread.h"
@@ -1555,8 +1552,8 @@ db_env_close (DB_ENV *env, U32 flags = 0, SV *callback = 0)
         CALLBACK
 	CODE:
 {
-        ptr_nuke (ST (0));
 	dREQ (REQ_ENV_CLOSE, 0);
+        ptr_nuke (ST (0));
         req->env   = env;
         req->uint1 = flags;
         REQ_SEND;
@@ -1679,8 +1676,8 @@ db_close (DB *db, U32 flags = 0, SV *callback = 0)
         CALLBACK
 	CODE:
 {
-        ptr_nuke (ST (0));
         dREQ (REQ_DB_CLOSE, 0);
+        ptr_nuke (ST (0));
         req->db    = db;
         req->uint1 = flags;
         req->sv1   = (SV *)db->app_private;
@@ -1838,8 +1835,8 @@ db_txn_commit (DB_TXN *txn, U32 flags = 0, SV *callback = 0)
         CALLBACK
 	CODE:
 {
-        ptr_nuke (ST (0));
         dREQ (REQ_TXN_COMMIT, 0);
+        ptr_nuke (ST (0));
         req->txn   = txn;
         req->uint1 = flags;
         REQ_SEND;
@@ -1851,8 +1848,8 @@ db_txn_abort (DB_TXN *txn, SV *callback = 0)
         CALLBACK
 	CODE:
 {
-        ptr_nuke (ST (0));
         dREQ (REQ_TXN_ABORT, 0);
+        ptr_nuke (ST (0));
         req->txn   = txn;
         REQ_SEND;
 }
@@ -1863,8 +1860,8 @@ db_txn_finish (DB_TXN *txn, U32 flags = 0, SV *callback = 0)
         CALLBACK
 	CODE:
 {
-        ptr_nuke (ST (0));
         dREQ (REQ_TXN_FINISH, 0);
+        ptr_nuke (ST (0));
         req->txn   = txn;
         req->uint1 = flags;
         REQ_SEND;
@@ -1876,8 +1873,8 @@ db_c_close (DBC *dbc, SV *callback = 0)
         CALLBACK
 	CODE:
 {
-        ptr_nuke (ST (0));
         dREQ (REQ_C_CLOSE, 0);
+        ptr_nuke (ST (0));
         req->dbc = dbc;
         REQ_SEND;
 }
@@ -1917,29 +1914,31 @@ db_c_get (DBC *dbc, SV *key, SV_mutable *data, U32 flags = 0, SV *callback = 0)
         if (flags & DB_OPFLAGS_MASK != DB_SET && SvREADONLY (key))
           croak ("db_c_get was passed a read-only/constant 'key' argument but operation is not DB_SET");
 
-        dREQ (REQ_C_GET, 1);
-        req->dbc   = dbc;
-        req->uint1 = flags;
-        if (flags & DB_OPFLAGS_MASK == DB_SET)
-          sv_to_dbt (&req->dbt1, key);
-        else
-          {
-            if (flags & DB_OPFLAGS_MASK == DB_SET_RANGE)
-              sv_to_dbt (&req->dbt1, key);
-            else
-              req->dbt1.flags = DB_DBT_MALLOC;
+        {
+          dREQ (REQ_C_GET, 1);
+          req->dbc   = dbc;
+          req->uint1 = flags;
+          if (flags & DB_OPFLAGS_MASK == DB_SET)
+            sv_to_dbt (&req->dbt1, key);
+          else
+            {
+              if (flags & DB_OPFLAGS_MASK == DB_SET_RANGE)
+                sv_to_dbt (&req->dbt1, key);
+              else
+                req->dbt1.flags = DB_DBT_MALLOC;
 
-            req->sv1 = SvREFCNT_inc (key); SvREADONLY_on (key);
-          }
+              req->sv1 = SvREFCNT_inc (key); SvREADONLY_on (key);
+            }
 
-        if (flags & DB_OPFLAGS_MASK == DB_GET_BOTH
-            || flags & DB_OPFLAGS_MASK == DB_GET_BOTH_RANGE)
-          sv_to_dbt (&req->dbt3, data);
-        else
-          req->dbt3.flags = DB_DBT_MALLOC;
+          if (flags & DB_OPFLAGS_MASK == DB_GET_BOTH
+              || flags & DB_OPFLAGS_MASK == DB_GET_BOTH_RANGE)
+            sv_to_dbt (&req->dbt3, data);
+          else
+            req->dbt3.flags = DB_DBT_MALLOC;
 
-        req->sv3 = SvREFCNT_inc (data); SvREADONLY_on (data);
-        REQ_SEND;
+          req->sv3 = SvREFCNT_inc (data); SvREADONLY_on (data);
+          REQ_SEND;
+        }
 }
 
 void
@@ -1951,32 +1950,34 @@ db_c_pget (DBC *dbc, SV *key, SV_mutable *pkey, SV_mutable *data, U32 flags = 0,
         if (flags & DB_OPFLAGS_MASK != DB_SET && SvREADONLY (key))
           croak ("db_c_pget was passed a read-only/constant 'key' argument but operation is not DB_SET");
 
-        dREQ (REQ_C_PGET, 1);
-        req->dbc   = dbc;
-        req->uint1 = flags;
-        if (flags & DB_OPFLAGS_MASK == DB_SET)
-          sv_to_dbt (&req->dbt1, key);
-        else
-          {
-            if (flags & DB_OPFLAGS_MASK == DB_SET_RANGE)
-              sv_to_dbt (&req->dbt1, key);
-            else
-              req->dbt1.flags = DB_DBT_MALLOC;
+        {
+          dREQ (REQ_C_PGET, 1);
+          req->dbc   = dbc;
+          req->uint1 = flags;
+          if (flags & DB_OPFLAGS_MASK == DB_SET)
+            sv_to_dbt (&req->dbt1, key);
+          else
+            {
+              if (flags & DB_OPFLAGS_MASK == DB_SET_RANGE)
+                sv_to_dbt (&req->dbt1, key);
+              else
+                req->dbt1.flags = DB_DBT_MALLOC;
 
-            req->sv1 = SvREFCNT_inc (key); SvREADONLY_on (key);
-          }
+              req->sv1 = SvREFCNT_inc (key); SvREADONLY_on (key);
+            }
 
-        req->dbt2.flags = DB_DBT_MALLOC;
-        req->sv2 = SvREFCNT_inc (pkey); SvREADONLY_on (pkey);
+          req->dbt2.flags = DB_DBT_MALLOC;
+          req->sv2 = SvREFCNT_inc (pkey); SvREADONLY_on (pkey);
 
-        if (flags & DB_OPFLAGS_MASK == DB_GET_BOTH
-            || flags & DB_OPFLAGS_MASK == DB_GET_BOTH_RANGE)
-          sv_to_dbt (&req->dbt3, data);
-        else
-          req->dbt3.flags = DB_DBT_MALLOC;
+          if (flags & DB_OPFLAGS_MASK == DB_GET_BOTH
+              || flags & DB_OPFLAGS_MASK == DB_GET_BOTH_RANGE)
+            sv_to_dbt (&req->dbt3, data);
+          else
+            req->dbt3.flags = DB_DBT_MALLOC;
 
-        req->sv3 = SvREFCNT_inc (data); SvREADONLY_on (data);
-        REQ_SEND;
+          req->sv3 = SvREFCNT_inc (data); SvREADONLY_on (data);
+          REQ_SEND;
+        }
 }
 
 void
@@ -2014,8 +2015,8 @@ db_sequence_close (DB_SEQUENCE *seq, U32 flags = 0, SV *callback = 0)
         CALLBACK
 	CODE:
 {
-        ptr_nuke (ST (0));
         dREQ (REQ_SEQ_CLOSE, 0);
+        ptr_nuke (ST (0));
         req->seq   = seq;
         req->uint1 = flags;
         REQ_SEND;
