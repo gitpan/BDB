@@ -14,7 +14,6 @@ DB_SEQUENCE *  		DB_SEQUENCE
 DB_SEQUENCE_ornull *	DB_SEQUENCE_ornull
 DB_SEQUENCE_ornuked *	DB_SEQUENCE_ornuked
 
-SV8 *			T_SV8
 bdb_filename		BDB_FILENAME
 db_seq_t		DB_SEQ
 
@@ -29,10 +28,7 @@ T_SV_MUTABLE
         if (SvREADONLY ($var))
           croak (\"argument \\\"%s\\\" is read-only/constant, but %s needs to write results into it\",
                  \"$var\",
-                 \"${Package}::$func_name\")
-
-T_SV8
-	($var) = $arg;
+                 \"${Package}::$func_name\");
         if (SvPOKp ($var) && !sv_utf8_downgrade ($var, 1))
           croak (\"argument \\\"%s\\\" must be byte/octet-encoded in %s\",
                  \"$var\",

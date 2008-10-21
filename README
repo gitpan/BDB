@@ -88,15 +88,7 @@ REQUEST ANATOMY AND LIFETIME
         the actual aio request is severed and calling its methods will
         either do nothing or result in a runtime error).
 
-  WIN32 FILENAMES/DATABASE NAME MESS
-    Perl on Win32 supports only ASCII filenames (the reason is that it
-    abuses an internal flag to store wether a filename is Unicode or ANSI,
-    but that flag is used for somethign else in the perl core, so there is
-    no way to detect wether a filename is ANSI or Unicode-encoded). The BDB
-    module tries to work around this issue by assuming that the filename is
-    an ANSI filename and BDB was built for unicode support.
-
-  BERKELEYDB FUNCTIONS
+BERKELEYDB FUNCTIONS
     All of these are functions. The create functions simply return a new
     object and never block. All the remaining functions take an optional
     callback as last argument. If it is missing, then the function will be
@@ -144,7 +136,7 @@ REQUEST ANATOMY AND LIFETIME
        db_env_txn_checkpoint $db_env, 0, 0, 0;
        db_env_txn_checkpoint $db_env, 0;
 
-   BDB functions
+  BDB functions
     Functions in the BDB namespace, exported by default:
 
        $env = db_env_create (U32 env_flags = 0)
@@ -161,6 +153,7 @@ REQUEST ANATOMY AND LIFETIME
        db_env_memp_trickle (DB_ENV *env, int percent, SV *dummy = 0, SV *callback = &PL_sv_undef)
        db_env_dbremove (DB_ENV *env, DB_TXN_ornull *txnid, bdb_filename file, bdb_filename database, U32 flags = 0, SV *callback = &PL_sv_undef)
        db_env_dbrename (DB_ENV *env, DB_TXN_ornull *txnid, bdb_filename file, bdb_filename database, bdb_filename newname, U32 flags = 0, SV *callback = &PL_sv_undef)
+       db_env_log_archive (DB_ENV *env, SV *listp, U32 flags = 0, SV *callback = &PL_sv_undef)
 
        $db = db_create (DB_ENV *env = 0, U32 flags = 0)
           flags: XA_CREATE
@@ -238,7 +231,7 @@ REQUEST ANATOMY AND LIFETIME
     failed in this way and abort further processing (excluding
     "db_txn_finish").
 
-   DB_ENV/database environment methods
+  DB_ENV/database environment methods
     Methods available on DB_ENV/$env handles:
 
        DESTROY (DB_ENV_ornull *env)
@@ -297,7 +290,7 @@ REQUEST ANATOMY AND LIFETIME
 
        $env->set_flags (BDB::AUTO_COMMIT | BDB::TXN_NOSYNC, 1);
 
-   DB/database methods
+  DB/database methods
     Methods available on DB/$db handles:
 
        DESTROY (DB_ornull *db)
@@ -347,7 +340,7 @@ REQUEST ANATOMY AND LIFETIME
 
        db_sync $db;
 
-   DB_TXN/transaction methods
+  DB_TXN/transaction methods
     Methods available on DB_TXN/$txn handles:
 
        DESTROY (DB_TXN_ornull *txn)
@@ -361,7 +354,7 @@ REQUEST ANATOMY AND LIFETIME
        $bool = $txn->failed
        # see db_txn_finish documentation, above
 
-   DBC/cursor methods
+  DBC/cursor methods
     Methods available on DBC/$dbc handles:
 
        DESTROY (DBC_ornull *dbc)
@@ -382,7 +375,7 @@ REQUEST ANATOMY AND LIFETIME
 
        db_c_close $c;
 
-   DB_SEQUENCE/sequence methods
+  DB_SEQUENCE/sequence methods
     Methods available on DB_SEQUENCE/$seq handles:
 
        DESTROY (DB_SEQUENCE_ornull *seq)
@@ -402,8 +395,8 @@ REQUEST ANATOMY AND LIFETIME
    db_sequence_open $seq, undef, "seq", BDB::CREATE;
        db_sequence_get $seq, undef, 1, my $value;
 
-  SUPPORT FUNCTIONS
-   EVENT PROCESSING AND EVENT LOOP INTEGRATION
+SUPPORT FUNCTIONS
+  EVENT PROCESSING AND EVENT LOOP INTEGRATION
     $msg = BDB::strerror [$errno]
         Returns the string corresponding to the given errno value. If no
         argument is given, use $!.
@@ -490,7 +483,7 @@ REQUEST ANATOMY AND LIFETIME
            BDB::poll_wait, BDB::poll_cb
               while BDB::nreqs;
 
-   VERSION CHECKING
+  VERSION CHECKING
     BerkeleyDB comes in various versions, many of them have minor
     incompatibilities. This means that traditional "at least version x.x"
     checks are often not sufficient.
@@ -530,7 +523,7 @@ REQUEST ANATOMY AND LIFETIME
            BDB::VERSION v0, v4.7
               or die "version 4.7 is not yet supported";
 
-   CONTROLLING THE NUMBER OF THREADS
+  CONTROLLING THE NUMBER OF THREADS
     BDB::min_parallel $nthreads
         Set the minimum number of BDB threads to $nthreads. The current
         default is 8, which means eight asynchronous operations can execute
@@ -629,7 +622,7 @@ REQUEST ANATOMY AND LIFETIME
         execute callback-less BDB requests in the foreground thread, setting
         $! to the return value, without polling for other events.
 
-   STATISTICAL INFORMATION
+  STATISTICAL INFORMATION
     BDB::nreqs
         Returns the number of requests currently in the ready, execute or
         pending states (i.e. for which their callback has not been invoked
@@ -648,7 +641,27 @@ REQUEST ANATOMY AND LIFETIME
         Returns the number of requests currently in the pending state
         (executed, but not yet processed by poll_cb).
 
-  FORK BEHAVIOUR
+COMMON PITFALLS
+  Unexpected Crashes
+    Remember that, by default, BDB will execute requests in parallel, in
+    somewhat random order. That means that it is easy to run a "db_get"
+    request on thesa me database as a concurrent "db_close" request, leading
+    to a crash, silent data corruption, eventually the next world war on
+    terrorism.
+
+    If you only ever use foreground requests (without a callback), this will
+    not be an issue.
+
+  Unexpected Freezes or Deadlocks
+    Remember that, by default, BDB will execute requests in parallel, which
+    easily leads to deadlocks (even concurrent put's on the same database
+    can deadlock).
+
+    You either need to run deadlock detection (and handle the resulting
+    errors), or make sure only one process ever updates the database, ine
+    one thread, e.g. by using only foreground requests (without a callback).
+
+FORK BEHAVIOUR
     This module should do "the right thing" when the process using it forks:
 
     Before the fork, BDB enters a quiescent state where no requests can be
@@ -667,7 +680,7 @@ REQUEST ANATOMY AND LIFETIME
     broken to be supported, so do not use BDB in a windows pseudo-fork,
     better yet, switch to a more capable platform.
 
-  MEMORY USAGE
+MEMORY USAGE
     Per-request usage:
 
     Each aio request uses - depending on your architecture - around 100-200
@@ -684,6 +697,14 @@ REQUEST ANATOMY AND LIFETIME
     In the execution phase, some aio requests require more memory for
     temporary buffers, and each thread requires a stack and other data
     structures (usually around 16k-128k, depending on the OS).
+
+WIN32 FILENAMES/DATABASE NAME MESS
+    Perl on Win32 supports only ASCII filenames (the reason is that it
+    abuses an internal flag to store wether a filename is Unicode or ANSI,
+    but that flag is used for somethign else in the perl core, so there is
+    no way to detect wether a filename is ANSI or Unicode-encoded). The BDB
+    module tries to work around this issue by assuming that the filename is
+    an ANSI filename and BDB was built for unicode support.
 
 KNOWN BUGS
     Known bugs will be fixed in the next release, except:

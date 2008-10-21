@@ -113,11 +113,12 @@ use base 'Exporter';
 our $VERSION;
 
 BEGIN {
-   $VERSION = '1.801';
+   $VERSION = '1.81';
 
    our @BDB_REQ = qw(
       db_env_open db_env_close db_env_txn_checkpoint db_env_lock_detect
       db_env_memp_sync db_env_memp_trickle db_env_dbrename db_env_dbremove
+      db_env_log_archive
       db_open db_close db_compact db_sync db_upgrade
       db_put db_exists db_get db_pget db_del db_key_range
       db_txn_commit db_txn_abort db_txn_finish
@@ -137,16 +138,7 @@ BEGIN {
    XSLoader::load ("BDB", $VERSION);
 }
 
-=head2 WIN32 FILENAMES/DATABASE NAME MESS
-
-Perl on Win32 supports only ASCII filenames (the reason is that it abuses
-an internal flag to store wether a filename is Unicode or ANSI, but that
-flag is used for somethign else in the perl core, so there is no way to
-detect wether a filename is ANSI or Unicode-encoded). The BDB module
-tries to work around this issue by assuming that the filename is an ANSI
-filename and BDB was built for unicode support.
-
-=head2 BERKELEYDB FUNCTIONS
+=head1 BERKELEYDB FUNCTIONS
 
 All of these are functions. The create functions simply return a new
 object and never block. All the remaining functions take an optional
@@ -195,7 +187,7 @@ executed synchronously:
    db_env_txn_checkpoint $db_env, 0, 0, 0;
    db_env_txn_checkpoint $db_env, 0;
 
-=head3 BDB functions
+=head2 BDB functions
 
 Functions in the BDB namespace, exported by default:
 
@@ -213,6 +205,7 @@ Functions in the BDB namespace, exported by default:
    db_env_memp_trickle (DB_ENV *env, int percent, SV *dummy = 0, SV *callback = &PL_sv_undef)
    db_env_dbremove (DB_ENV *env, DB_TXN_ornull *txnid, bdb_filename file, bdb_filename database, U32 flags = 0, SV *callback = &PL_sv_undef)
    db_env_dbrename (DB_ENV *env, DB_TXN_ornull *txnid, bdb_filename file, bdb_filename database, bdb_filename newname, U32 flags = 0, SV *callback = &PL_sv_undef)
+   db_env_log_archive (DB_ENV *env, SV *listp, U32 flags = 0, SV *callback = &PL_sv_undef)
 
    $db = db_create (DB_ENV *env = 0, U32 flags = 0)
       flags: XA_CREATE
@@ -255,7 +248,7 @@ Functions in the BDB namespace, exported by default:
    db_sequence_remove (DB_SEQUENCE *seq, DB_TXN_ornull *txnid = 0, U32 flags = 0, SV *callback = &PL_sv_undef)
       flags: TXN_NOSYNC
 
-=head4 db_txn_finish (DB_TXN *txn, U32 flags = 0, SV *callback = &PL_sv_undef)
+=head3 db_txn_finish (DB_TXN *txn, U32 flags = 0, SV *callback = &PL_sv_undef)
 
 This is not actually a Berkeley DB function but a BDB module
 extension. The background for this exytension is: It is very annoying to
@@ -291,7 +284,7 @@ You can use the C<< $txn->failed >> method to check wether a transaction
 has failed in this way and abort further processing (excluding
 C<db_txn_finish>).
 
-=head3 DB_ENV/database environment methods
+=head2 DB_ENV/database environment methods
 
 Methods available on DB_ENV/$env handles:
 
@@ -331,7 +324,7 @@ Methods available on DB_ENV/$env handles:
       flags: READ_COMMITTED READ_UNCOMMITTED TXN_NOSYNC TXN_NOWAIT TXN_SNAPSHOT TXN_SYNC TXN_WAIT TXN_WRITE_NOSYNC
    $txn = $env->cdsgroup_begin; (v4.5)
 
-=head4 Example:
+=head3 Example:
 
    use AnyEvent;
    use BDB;
@@ -353,7 +346,7 @@ Methods available on DB_ENV/$env handles:
    $env->set_flags (BDB::AUTO_COMMIT | BDB::TXN_NOSYNC, 1);
 
 
-=head3 DB/database methods
+=head2 DB/database methods
 
 Methods available on DB/$db handles:
 
@@ -389,7 +382,7 @@ Methods available on DB/$db handles:
       flags: READ_COMMITTED READ_UNCOMMITTED WRITECURSOR TXN_SNAPSHOT
    $seq = $db->sequence (U32 flags = 0)
 
-=head4 Example:
+=head3 Example:
 
    my $db = db_create $env;
    db_open $db, undef, "table", undef, BDB::BTREE, BDB::AUTO_COMMIT | BDB::CREATE | BDB::READ_UNCOMMITTED, 0600;
@@ -406,7 +399,7 @@ Methods available on DB/$db handles:
    db_sync $db;
 
 
-=head3 DB_TXN/transaction methods
+=head2 DB_TXN/transaction methods
 
 Methods available on DB_TXN/$txn handles:
 
@@ -422,7 +415,7 @@ Methods available on DB_TXN/$txn handles:
    # see db_txn_finish documentation, above
 
 
-=head3 DBC/cursor methods
+=head2 DBC/cursor methods
 
 Methods available on DBC/$dbc handles:
 
@@ -433,7 +426,7 @@ Methods available on DBC/$dbc handles:
 
    $int = $cursor->set_priority ($priority = PRIORITY_*) (v4.6)
 
-=head4 Example:
+=head3 Example:
 
    my $c = $db->cursor;
 
@@ -446,7 +439,7 @@ Methods available on DBC/$dbc handles:
    db_c_close $c;
 
 
-=head3 DB_SEQUENCE/sequence methods
+=head2 DB_SEQUENCE/sequence methods
 
 Methods available on DB_SEQUENCE/$seq handles:
 
@@ -461,7 +454,7 @@ Methods available on DB_SEQUENCE/$seq handles:
       flags: SEQ_DEC SEQ_INC SEQ_WRAP
    $int = $seq->set_range (db_seq_t min, db_seq_t max)
 
-=head4 Example:
+=head3 Example:
 
    my $seq = $db->sequence;
       
@@ -469,9 +462,9 @@ Methods available on DB_SEQUENCE/$seq handles:
    db_sequence_get $seq, undef, 1, my $value;
 
 
-=head2 SUPPORT FUNCTIONS
+=head1 SUPPORT FUNCTIONS
 
-=head3 EVENT PROCESSING AND EVENT LOOP INTEGRATION
+=head2 EVENT PROCESSING AND EVENT LOOP INTEGRATION
 
 =over 4
 
@@ -568,7 +561,7 @@ Strictly equivalent to:
 
 =back
 
-=head3 VERSION CHECKING
+=head2 VERSION CHECKING
 
 BerkeleyDB comes in various versions, many of them have minor
 incompatibilities. This means that traditional "at least version x.x"
@@ -634,7 +627,7 @@ sub VERSION {
    }
 }
 
-=head3 CONTROLLING THE NUMBER OF THREADS
+=head2 CONTROLLING THE NUMBER OF THREADS
 
 =over 4
 
@@ -737,7 +730,7 @@ to the return value, without polling for other events.
 
 =back
 
-=head3 STATISTICAL INFORMATION
+=head2 STATISTICAL INFORMATION
 
 =over 4
 
@@ -773,7 +766,30 @@ END { flush }
 
 1;
 
-=head2 FORK BEHAVIOUR
+=head1 COMMON PITFALLS
+
+=head2 Unexpected Crashes
+
+Remember that, by default, BDB will execute requests in parallel, in
+somewhat random order. That means that it is easy to run a C<db_get>
+request on thesa me database as a concurrent C<db_close> request, leading
+to a crash, silent data corruption, eventually the next world war on
+terrorism.
+
+If you only ever use foreground requests (without a callback), this will
+not be an issue.
+
+=head2 Unexpected Freezes or Deadlocks
+
+Remember that, by default, BDB will execute requests in parallel, which
+easily leads to deadlocks (even concurrent put's on the same database can
+deadlock).
+
+You either need to run deadlock detection (and handle the resulting
+errors), or make sure only one process ever updates the database, ine one
+thread, e.g. by using only foreground requests (without a callback).
+
+=head1 FORK BEHAVIOUR
 
 This module should do "the right thing" when the process using it forks:
 
@@ -793,7 +809,7 @@ Win32 note: there is no fork on win32, and perls emulation of it is too
 broken to be supported, so do not use BDB in a windows pseudo-fork, better
 yet, switch to a more capable platform.
 
-=head2 MEMORY USAGE
+=head1 MEMORY USAGE
 
 Per-request usage:
 
@@ -811,6 +827,15 @@ Per-thread usage:
 In the execution phase, some aio requests require more memory for
 temporary buffers, and each thread requires a stack and other data
 structures (usually around 16k-128k, depending on the OS).
+
+=head1 WIN32 FILENAMES/DATABASE NAME MESS
+
+Perl on Win32 supports only ASCII filenames (the reason is that it abuses
+an internal flag to store wether a filename is Unicode or ANSI, but that
+flag is used for somethign else in the perl core, so there is no way to
+detect wether a filename is ANSI or Unicode-encoded). The BDB module
+tries to work around this issue by assuming that the filename is an ANSI
+filename and BDB was built for unicode support.
 
 =head1 KNOWN BUGS
 

@@ -1,5 +1,21 @@
 Revision history for perl module BDB.
 
+TODO: DB_RECNUM/DB_SET_RECNO?
+
+1.81 Tue Oct 21 04:20:25 CEST 2008
+	- check that mutable arguments can be downgraded - this
+          /very indirectly) ensures that output variables won't
+          have spurious utf-8 flags.
+        - fix opmode checdk in db_c_get, db_c_pget again.
+        - allow undef/default arguments for db_compact, for a
+          crash-free tomorrow!
+        - fix a memleak in db_key_range.
+        - started a common pitfdalls section.
+        - added db_env_log_archive.
+        - added db->set_pagesize.
+        - added BDB::IGNORE_LEASE.
+        - reworked documentation structure.
+
 1.801 Mon Sep 29 04:58:03 CEST 2008
 	- removed ptrace.h and user.h includes thta have been left in
           erronously.

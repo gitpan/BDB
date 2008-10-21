@@ -55,7 +55,6 @@ typedef DB_SEQUENCE DB_SEQUENCE_ornull;
 typedef DB_SEQUENCE DB_SEQUENCE_ornuked;
 #endif
 
-typedef SV SV8; /* byte-sv, used for argument-checking */
 typedef char *bdb_filename;
 
 static SV *prepare_cb;
@@ -152,6 +151,7 @@ enum {
   REQ_QUIT,
   REQ_ENV_OPEN, REQ_ENV_CLOSE, REQ_ENV_TXN_CHECKPOINT, REQ_ENV_LOCK_DETECT,
   REQ_ENV_MEMP_SYNC, REQ_ENV_MEMP_TRICKLE, REQ_ENV_DBREMOVE, REQ_ENV_DBRENAME,
+  REQ_ENV_LOG_ARCHIVE,
   REQ_DB_OPEN, REQ_DB_CLOSE, REQ_DB_COMPACT, REQ_DB_SYNC, REQ_DB_UPGRADE,
   REQ_DB_PUT, REQ_DB_EXISTS, REQ_DB_GET, REQ_DB_PGET, REQ_DB_DEL, REQ_DB_KEY_RANGE,
   REQ_TXN_COMMIT, REQ_TXN_ABORT, REQ_TXN_FINISH,
@@ -352,7 +352,6 @@ bdb_req reqq_shift (reqq *q)
 
 static int poll_cb (void);
 static void req_free (bdb_req req);
-static void req_cancel (bdb_req req);
 
 static int req_invoke (bdb_req req)
 {
@@ -381,8 +380,11 @@ static int req_invoke (bdb_req req)
           av_push (av, newSVnv (req->key_range.equal));
           av_push (av, newSVnv (req->key_range.greater));
 
+          av = (AV *)newRV_noinc ((SV *)av);
+
           SvREADONLY_off (req->sv1);
           sv_setsv_mg (req->sv1, newRV_noinc ((SV *)av));
+          SvREFCNT_dec (av);
           SvREFCNT_dec (req->sv1);
         }
         break;
@@ -399,6 +401,24 @@ static int req_invoke (bdb_req req)
         SvREFCNT_dec (req->sv1);
         break;
 #endif
+
+      case REQ_ENV_LOG_ARCHIVE:
+        {
+          AV *av = newAV ();
+          char **listp = (char **)req->buf1;
+
+          if (listp)
+            while (*listp)
+              av_push (av, newSVpv (*listp, 0)), ++listp;
+
+          av = (AV *)newRV_noinc ((SV *)av);
+
+          SvREADONLY_off (req->sv1);
+          sv_setsv_mg (req->sv1, (SV *)av);
+          SvREFCNT_dec (av);
+          SvREFCNT_dec (req->sv1);
+        }
+        break;
     }
 
   errno = req->result;
@@ -772,7 +792,7 @@ bdb_request (bdb_req req)
 
 #if DB_VERSION_MINOR >= 4
       case REQ_DB_COMPACT:
-        req->result = req->db->compact (req->db, req->txn, &req->dbt1, &req->dbt2, 0, req->uint1, 0);
+        req->result = req->db->compact (req->db, req->txn, req->dbt1.data ? &req->dbt1 : 0, req->dbt2.data ? &req->dbt2 : 0, 0, req->uint1, 0);
         break;
 #endif
 
@@ -873,6 +893,14 @@ bdb_request (bdb_req req)
         req->result = req->seq->remove (req->seq, req->txn, req->uint1);
         break;
 #endif
+
+      case REQ_ENV_LOG_ARCHIVE:
+        {
+          char **listp = 0; /* DB_ARCH_REMOVE does not touch listp, contrary to docs */
+          req->result = req->env->log_archive (req->env, &listp, req->uint1);
+          req->buf1 = (char *)listp;
+        }
+        break;
 
       default:
         req->result = ENOSYS;
@@ -1137,7 +1165,7 @@ pop_callback (I32 *ritems, SV *sv)
   return 0;
 }
 
-/* stupid windoes defined CALLBACK as well */
+/* stupid windows defines CALLBACK as well */
 #undef CALLBACK
 #define CALLBACK SV *cb = pop_callback (&items, ST (items - 1));
 
@@ -1200,7 +1228,7 @@ BOOT:
           const_iv (ENCRYPT)
           const_iv (DUP)
           const_iv (DUPSORT)
-          const_iv (RECNUM)
+          //const_iv (RECNUM)
           const_iv (RENUMBER)
           const_iv (REVSPLITOFF)
           const_iv (CONSUME)
@@ -1282,6 +1310,11 @@ BOOT:
           const_iv (SECONDARY_BAD)
           const_iv (VERIFY_BAD)
 
+          const_iv (ARCH_ABS)
+          const_iv (ARCH_DATA)
+          const_iv (ARCH_LOG)
+          const_iv (ARCH_REMOVE)
+
           const_iv (VERB_DEADLOCK)
           const_iv (VERB_RECOVERY)
           const_iv (VERB_REPLICATION)
@@ -1324,8 +1357,10 @@ BOOT:
           const_iv (PRIORITY_DEFAULT)
           const_iv (PRIORITY_HIGH)
           const_iv (PRIORITY_VERY_HIGH)
+          const_iv (IGNORE_LEASE)
 #endif
 #if DB_VERSION_MINOR >= 7
+          //const_iv (MULTIPLE_KEY)
           const_iv (LOG_DIRECT)
           const_iv (LOG_DSYNC)
           const_iv (LOG_AUTO_REMOVE)
@@ -1639,6 +1674,19 @@ db_env_dbrename (DB_ENV *env, DB_TXN_ornull *txnid, bdb_filename file, bdb_filen
         REQ_SEND;
 }
 
+void
+db_env_log_archive (DB_ENV *env, SV_mutable *listp, U32 flags = 0, SV *callback = 0)
+	PREINIT:
+        CALLBACK
+	CODE:
+{
+	dREQ (REQ_ENV_LOG_ARCHIVE, 1);
+        req->sv1   = SvREFCNT_inc (listp);
+        req->env   = env;
+        req->uint1 = flags;
+        REQ_SEND;
+}
+
 DB *
 db_create (DB_ENV *env = 0, U32 flags = 0)
 	CODE:
@@ -1695,8 +1743,8 @@ db_compact (DB *db, DB_TXN_ornull *txn = 0, SV *start = 0, SV *stop = 0, SV *unu
         dREQ (REQ_DB_COMPACT, 2);
         req->db    = db;
         req->txn   = txn;
-        sv_to_dbt (&req->dbt1, start);
-        sv_to_dbt (&req->dbt2, stop);
+        if (start) sv_to_dbt (&req->dbt1, start);
+        if (stop ) sv_to_dbt (&req->dbt2, stop );
         req->uint1 = flags;
         REQ_SEND;
 }
@@ -1911,18 +1959,22 @@ db_c_get (DBC *dbc, SV *key, SV_mutable *data, U32 flags = 0, SV *callback = 0)
         CALLBACK
 	CODE:
 {
-        if (flags & DB_OPFLAGS_MASK != DB_SET && SvREADONLY (key))
+        if ((flags & DB_OPFLAGS_MASK) != DB_SET && SvREADONLY (key))
           croak ("db_c_get was passed a read-only/constant 'key' argument but operation is not DB_SET");
+        if (SvPOKp (key) && !sv_utf8_downgrade (key, 1))
+          croak ("argument \"%s\" must be byte/octet-encoded in %s",
+                 "key",
+                 "BDB::db_c_get");
 
         {
           dREQ (REQ_C_GET, 1);
           req->dbc   = dbc;
           req->uint1 = flags;
-          if (flags & DB_OPFLAGS_MASK == DB_SET)
+          if ((flags & DB_OPFLAGS_MASK) == DB_SET)
             sv_to_dbt (&req->dbt1, key);
           else
             {
-              if (flags & DB_OPFLAGS_MASK == DB_SET_RANGE)
+              if ((flags & DB_OPFLAGS_MASK) == DB_SET_RANGE)
                 sv_to_dbt (&req->dbt1, key);
               else
                 req->dbt1.flags = DB_DBT_MALLOC;
@@ -1930,8 +1982,8 @@ db_c_get (DBC *dbc, SV *key, SV_mutable *data, U32 flags = 0, SV *callback = 0)
               req->sv1 = SvREFCNT_inc (key); SvREADONLY_on (key);
             }
 
-          if (flags & DB_OPFLAGS_MASK == DB_GET_BOTH
-              || flags & DB_OPFLAGS_MASK == DB_GET_BOTH_RANGE)
+          if ((flags & DB_OPFLAGS_MASK) == DB_GET_BOTH
+              || (flags & DB_OPFLAGS_MASK) == DB_GET_BOTH_RANGE)
             sv_to_dbt (&req->dbt3, data);
           else
             req->dbt3.flags = DB_DBT_MALLOC;
@@ -1947,18 +1999,22 @@ db_c_pget (DBC *dbc, SV *key, SV_mutable *pkey, SV_mutable *data, U32 flags = 0,
         CALLBACK
 	CODE:
 {
-        if (flags & DB_OPFLAGS_MASK != DB_SET && SvREADONLY (key))
+        if ((flags & DB_OPFLAGS_MASK) != DB_SET && SvREADONLY (key))
           croak ("db_c_pget was passed a read-only/constant 'key' argument but operation is not DB_SET");
+        if (SvPOKp (key) && !sv_utf8_downgrade (key, 1))
+          croak ("argument \"%s\" must be byte/octet-encoded in %s",
+                 "key",
+                 "BDB::db_c_pget");
 
         {
           dREQ (REQ_C_PGET, 1);
           req->dbc   = dbc;
           req->uint1 = flags;
-          if (flags & DB_OPFLAGS_MASK == DB_SET)
+          if ((flags & DB_OPFLAGS_MASK) == DB_SET)
             sv_to_dbt (&req->dbt1, key);
           else
             {
-              if (flags & DB_OPFLAGS_MASK == DB_SET_RANGE)
+              if ((flags & DB_OPFLAGS_MASK) == DB_SET_RANGE)
                 sv_to_dbt (&req->dbt1, key);
               else
                 req->dbt1.flags = DB_DBT_MALLOC;
@@ -1969,8 +2025,8 @@ db_c_pget (DBC *dbc, SV *key, SV_mutable *pkey, SV_mutable *data, U32 flags = 0,
           req->dbt2.flags = DB_DBT_MALLOC;
           req->sv2 = SvREFCNT_inc (pkey); SvREADONLY_on (pkey);
 
-          if (flags & DB_OPFLAGS_MASK == DB_GET_BOTH
-              || flags & DB_OPFLAGS_MASK == DB_GET_BOTH_RANGE)
+          if ((flags & DB_OPFLAGS_MASK) == DB_GET_BOTH
+              || (flags & DB_OPFLAGS_MASK) == DB_GET_BOTH_RANGE)
             sv_to_dbt (&req->dbt3, data);
           else
             req->dbt3.flags = DB_DBT_MALLOC;
@@ -2259,6 +2315,12 @@ DESTROY (DB_ornuked *db)
 int set_cachesize (DB *db, U32 gbytes, U32 bytes, int ncache = 0)
 	CODE:
         RETVAL = db->set_cachesize (db, gbytes, bytes, ncache);
+	OUTPUT:
+        RETVAL
+
+int set_pagesize (DB *db, U32 pagesize)
+	CODE:
+        RETVAL = db->set_pagesize (db, pagesize);
 	OUTPUT:
         RETVAL
 
