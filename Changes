@@ -2,6 +2,11 @@ Revision history for perl module BDB.
 
 TODO: DB_RECNUM/DB_SET_RECNO?
 
+1.82 Sun Jan  4 11:22:44 CET 2009
+        - use our own socketpair emulation (stolen from libev), as perl's
+          doesn't work on vista, which returns fantasy port numbers
+          in getpeer/sockname.
+
 1.81 Tue Oct 21 04:20:25 CEST 2008
 	- check that mutable arguments can be downgraded - this
           /very indirectly) ensures that output variables won't

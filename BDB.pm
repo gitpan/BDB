@@ -113,7 +113,7 @@ use base 'Exporter';
 our $VERSION;
 
 BEGIN {
-   $VERSION = '1.81';
+   $VERSION = '1.82';
 
    our @BDB_REQ = qw(
       db_env_open db_env_close db_env_txn_checkpoint db_env_lock_detect
@@ -283,6 +283,7 @@ LOCK_DEADLOCK) and the transaction will be aborted.
 You can use the C<< $txn->failed >> method to check wether a transaction
 has failed in this way and abort further processing (excluding
 C<db_txn_finish>).
+
 
 =head2 DB_ENV/database environment methods
 

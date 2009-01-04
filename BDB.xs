@@ -461,7 +461,96 @@ static void req_free (bdb_req req)
 #ifdef USE_SOCKETS_AS_HANDLES
 # define TO_SOCKET(x) (win32_get_osfhandle (x))
 #else
+# define EV_SELECT_IS_WINSOCKET 1
 # define TO_SOCKET(x) (x)
+#endif
+
+#ifdef _WIN32
+/* taken verbatim from libev's ev_win32.c */
+/* oh, the humanity! */
+static int
+ev_pipe (int filedes [2])
+{
+  struct sockaddr_in addr = { 0 };
+  int addr_size = sizeof (addr);
+  struct sockaddr_in adr2;
+  int adr2_size;
+  SOCKET listener;
+  SOCKET sock [2] = { -1, -1 };
+
+  if ((listener = socket (AF_INET, SOCK_STREAM, 0)) == INVALID_SOCKET) 
+    return -1;
+
+  addr.sin_family = AF_INET;
+  addr.sin_addr.s_addr = htonl (INADDR_LOOPBACK);
+  addr.sin_port = 0;
+
+  if (bind (listener, (struct sockaddr *)&addr, addr_size))
+    goto fail;
+
+  if (getsockname (listener, (struct sockaddr *)&addr, &addr_size))
+    goto fail;
+
+  if (listen (listener, 1))
+    goto fail;
+
+  if ((sock [0] = socket (AF_INET, SOCK_STREAM, 0)) == INVALID_SOCKET) 
+    goto fail;
+
+  if (connect (sock [0], (struct sockaddr *)&addr, addr_size))
+    goto fail;
+
+  if ((sock [1] = accept (listener, 0, 0)) < 0)
+    goto fail;
+
+  /* windows vista returns fantasy port numbers for getpeername.
+   * example for two interconnected tcp sockets:
+   *
+   * (Socket::unpack_sockaddr_in getsockname $sock0)[0] == 53364
+   * (Socket::unpack_sockaddr_in getpeername $sock0)[0] == 53363
+   * (Socket::unpack_sockaddr_in getsockname $sock1)[0] == 53363
+   * (Socket::unpack_sockaddr_in getpeername $sock1)[0] == 53365
+   *
+   * wow! tridirectional sockets!
+   *
+   * this way of checking ports seems to work:
+   */
+  if (getpeername (sock [0], (struct sockaddr *)&addr, &addr_size))
+    goto fail;
+
+  if (getsockname (sock [1], (struct sockaddr *)&adr2, &adr2_size))
+    goto fail;
+
+  errno = WSAEINVAL;
+  if (addr_size != adr2_size
+      || addr.sin_addr.s_addr != adr2.sin_addr.s_addr /* just to be sure, I mean, it's windows */
+      || addr.sin_port        != adr2.sin_port)
+    goto fail;
+
+  closesocket (listener);
+
+#if EV_SELECT_IS_WINSOCKET
+  filedes [0] = _open_osfhandle (sock [0], 0);
+  filedes [1] = _open_osfhandle (sock [1], 0);
+#else
+  /* when select isn't winsocket, we also expect socket, connect, accept etc.
+   * to work on fds */
+  filedes [0] = sock [0];
+  filedes [1] = sock [1];
+#endif
+
+  return 0;
+
+fail:
+  closesocket (listener);
+
+  if (sock [0] != INVALID_SOCKET) closesocket (sock [0]);
+  if (sock [1] != INVALID_SOCKET) closesocket (sock [1]);
+
+  return -1;
+}
+
+#define pipe(filedes) ev_pipe(filedes)
 #endif
 
 static void
@@ -475,11 +564,7 @@ create_respipe (void)
   if (respipe [1] >= 0)
     respipe_close (TO_SOCKET (respipe [1]));
 
-#ifdef _WIN32
-  if (PerlSock_socketpair (AF_UNIX, SOCK_STREAM, 0, respipe))
-#else
   if (pipe (respipe))
-#endif
     croak ("unable to initialize result pipe");
 
   if (old_readfd >= 0)
@@ -1164,6 +1249,47 @@ pop_callback (I32 *ritems, SV *sv)
 
   return 0;
 }
+
+/*****************************************************************************/
+
+#if 0
+static int
+bt_pfxc_compare (DB *db, const DBT *dbt1, const DBT *dbt2)
+{
+  ssize_t size1 = dbt1->size;
+  ssize_t size2 = dbt2->size;
+  int res = memcmp ((void *)dbt1->data, (void *)dbt2->data,
+                    size1 <= size2 ? size1 : size2);
+
+  if (res)
+    return res;
+  else if (size1 - size2)
+    return size1 - size2;
+  else
+    return 0;
+}
+
+static size_t
+bt_pfxc_prefix_x (DB *db, const DBT *dbt1, const DBT *dbt2)
+{
+  ssize_t size1 = dbt1->size;
+  ssize_t size2 = dbt2->size;
+  u_int8_t *p1 = (u_int8_t *)dbt1->data;
+  u_int8_t *p2 = (u_int8_t *)dbt2->data;
+  u_int8_t *pe = p1 + (size1 <= size2 ? size1 : size2);
+
+  while (p1 < pe)
+    if (*p1++ != *p2++)
+      return p1 - (u_int8_t *)dbt1->data - 1;
+
+  if (size1 < size2) return size1 + 1;
+  if (size1 > size2) return size2 + 1;
+
+  return size1;
+}
+#endif
+
+/*****************************************************************************/
 
 /* stupid windows defines CALLBACK as well */
 #undef CALLBACK
