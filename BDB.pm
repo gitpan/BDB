@@ -113,13 +113,13 @@ use base 'Exporter';
 our $VERSION;
 
 BEGIN {
-   $VERSION = '1.82';
+   $VERSION = '1.83';
 
    our @BDB_REQ = qw(
       db_env_open db_env_close db_env_txn_checkpoint db_env_lock_detect
       db_env_memp_sync db_env_memp_trickle db_env_dbrename db_env_dbremove
       db_env_log_archive
-      db_open db_close db_compact db_sync db_upgrade
+      db_open db_close db_compact db_sync db_verify db_upgrade
       db_put db_exists db_get db_pget db_del db_key_range
       db_txn_commit db_txn_abort db_txn_finish
       db_c_close db_c_count db_c_put db_c_get db_c_pget db_c_del
@@ -194,61 +194,62 @@ Functions in the BDB namespace, exported by default:
    $env = db_env_create (U32 env_flags = 0)
       flags: RPCCLIENT
 
-   db_env_open (DB_ENV *env, bdb_filename db_home, U32 open_flags, int mode, SV *callback = &PL_sv_undef)
+   db_env_open (DB_ENV *env, bdb_filename db_home, U32 open_flags, int mode, SV *callback = 0)
       open_flags: INIT_CDB INIT_LOCK INIT_LOG INIT_MPOOL INIT_REP INIT_TXN RECOVER RECOVER_FATAL USE_ENVIRON USE_ENVIRON_ROOT CREATE LOCKDOWN PRIVATE REGISTER SYSTEM_MEM
-   db_env_close (DB_ENV *env, U32 flags = 0, SV *callback = &PL_sv_undef)
-   db_env_txn_checkpoint (DB_ENV *env, U32 kbyte = 0, U32 min = 0, U32 flags = 0, SV *callback = &PL_sv_undef)
+   db_env_close (DB_ENV *env, U32 flags = 0, SV *callback = 0)
+   db_env_txn_checkpoint (DB_ENV *env, U32 kbyte = 0, U32 min = 0, U32 flags = 0, SV *callback = 0)
       flags: FORCE
-   db_env_lock_detect (DB_ENV *env, U32 flags = 0, U32 atype = DB_LOCK_DEFAULT, SV *dummy = 0, SV *callback = &PL_sv_undef)
+   db_env_lock_detect (DB_ENV *env, U32 flags = 0, U32 atype = DB_LOCK_DEFAULT, SV *dummy = 0, SV *callback = 0)
       atype: LOCK_DEFAULT LOCK_EXPIRE LOCK_MAXLOCKS LOCK_MAXWRITE LOCK_MINLOCKS LOCK_MINWRITE LOCK_OLDEST LOCK_RANDOM LOCK_YOUNGEST
-   db_env_memp_sync (DB_ENV *env, SV *dummy = 0, SV *callback = &PL_sv_undef)
-   db_env_memp_trickle (DB_ENV *env, int percent, SV *dummy = 0, SV *callback = &PL_sv_undef)
-   db_env_dbremove (DB_ENV *env, DB_TXN_ornull *txnid, bdb_filename file, bdb_filename database, U32 flags = 0, SV *callback = &PL_sv_undef)
-   db_env_dbrename (DB_ENV *env, DB_TXN_ornull *txnid, bdb_filename file, bdb_filename database, bdb_filename newname, U32 flags = 0, SV *callback = &PL_sv_undef)
-   db_env_log_archive (DB_ENV *env, SV *listp, U32 flags = 0, SV *callback = &PL_sv_undef)
+   db_env_memp_sync (DB_ENV *env, SV *dummy = 0, SV *callback = 0)
+   db_env_memp_trickle (DB_ENV *env, int percent, SV *dummy = 0, SV *callback = 0)
+   db_env_dbremove (DB_ENV *env, DB_TXN_ornull *txnid, bdb_filename file, bdb_filename database, U32 flags = 0, SV *callback = 0)
+   db_env_dbrename (DB_ENV *env, DB_TXN_ornull *txnid, bdb_filename file, bdb_filename database, bdb_filename newname, U32 flags = 0, SV *callback = 0)
+   db_env_log_archive (DB_ENV *env, SV *listp, U32 flags = 0, SV *callback = 0)
 
    $db = db_create (DB_ENV *env = 0, U32 flags = 0)
       flags: XA_CREATE
 
-   db_open (DB *db, DB_TXN_ornull *txnid, bdb_filename file, bdb_filename database, int type, U32 flags, int mode, SV *callback = &PL_sv_undef)
+   db_open (DB *db, DB_TXN_ornull *txnid, bdb_filename file, bdb_filename database, int type, U32 flags, int mode, SV *callback = 0)
       flags: AUTO_COMMIT CREATE EXCL MULTIVERSION NOMMAP RDONLY READ_UNCOMMITTED THREAD TRUNCATE
-   db_close (DB *db, U32 flags = 0, SV *callback = &PL_sv_undef)
+   db_close (DB *db, U32 flags = 0, SV *callback = 0)
       flags: DB_NOSYNC
-   db_upgrade (DB *db, bdb_filename file, U32 flags = 0, SV *callback = &PL_sv_undef)
-   db_compact (DB *db, DB_TXN_ornull *txn = 0, SV *start = 0, SV *stop = 0, SV *unused1 = 0, U32 flags = DB_FREE_SPACE, SV *unused2 = 0, SV *callback = &PL_sv_undef)
+   db_verify (DB *db, bdb_filename file, bdb_filename database = 0, SV *dummy = 0, U32 flags = 0, SV *callback = 0)
+   db_upgrade (DB *db, bdb_filename file, U32 flags = 0, SV *callback = 0)
+   db_compact (DB *db, DB_TXN_ornull *txn = 0, SV *start = 0, SV *stop = 0, SV *unused1 = 0, U32 flags = DB_FREE_SPACE, SV *unused2 = 0, SV *callback = 0)
       flags: FREELIST_ONLY FREE_SPACE
-   db_sync (DB *db, U32 flags = 0, SV *callback = &PL_sv_undef)
-   db_key_range (DB *db, DB_TXN_ornull *txn, SV *key, SV *key_range, U32 flags = 0, SV *callback = &PL_sv_undef)
-   db_put (DB *db, DB_TXN_ornull *txn, SV *key, SV *data, U32 flags = 0, SV *callback = &PL_sv_undef)
+   db_sync (DB *db, U32 flags = 0, SV *callback = 0)
+   db_key_range (DB *db, DB_TXN_ornull *txn, SV *key, SV *key_range, U32 flags = 0, SV *callback = 0)
+   db_put (DB *db, DB_TXN_ornull *txn, SV *key, SV *data, U32 flags = 0, SV *callback = 0)
       flags: APPEND NODUPDATA NOOVERWRITE
    db_exists (DB *db, DB_TXN_ornull *txn, SV *key, U32 flags = 0, SV *callback = 0) (v4.6)
-   db_get (DB *db, DB_TXN_ornull *txn, SV *key, SV *data, U32 flags = 0, SV *callback = &PL_sv_undef)
+   db_get (DB *db, DB_TXN_ornull *txn, SV *key, SV *data, U32 flags = 0, SV *callback = 0)
       flags: CONSUME CONSUME_WAIT GET_BOTH SET_RECNO MULTIPLE READ_COMMITTED READ_UNCOMMITTED RMW
-   db_pget (DB *db, DB_TXN_ornull *txn, SV *key, SV *pkey, SV *data, U32 flags = 0, SV *callback = &PL_sv_undef)
+   db_pget (DB *db, DB_TXN_ornull *txn, SV *key, SV *pkey, SV *data, U32 flags = 0, SV *callback = 0)
       flags: CONSUME CONSUME_WAIT GET_BOTH SET_RECNO MULTIPLE READ_COMMITTED READ_UNCOMMITTED RMW
-   db_del (DB *db, DB_TXN_ornull *txn, SV *key, U32 flags = 0, SV *callback = &PL_sv_undef)
-   db_txn_commit (DB_TXN *txn, U32 flags = 0, SV *callback = &PL_sv_undef)
+   db_del (DB *db, DB_TXN_ornull *txn, SV *key, U32 flags = 0, SV *callback = 0)
+   db_txn_commit (DB_TXN *txn, U32 flags = 0, SV *callback = 0)
       flags: TXN_NOSYNC TXN_SYNC
-   db_txn_abort (DB_TXN *txn, SV *callback = &PL_sv_undef)
+   db_txn_abort (DB_TXN *txn, SV *callback = 0)
 
-   db_c_close (DBC *dbc, SV *callback = &PL_sv_undef)
-   db_c_count (DBC *dbc, SV *count, U32 flags = 0, SV *callback = &PL_sv_undef)
-   db_c_put (DBC *dbc, SV *key, SV *data, U32 flags = 0, SV *callback = &PL_sv_undef)
+   db_c_close (DBC *dbc, SV *callback = 0)
+   db_c_count (DBC *dbc, SV *count, U32 flags = 0, SV *callback = 0)
+   db_c_put (DBC *dbc, SV *key, SV *data, U32 flags = 0, SV *callback = 0)
       flags: AFTER BEFORE CURRENT KEYFIRST KEYLAST NODUPDATA
-   db_c_get (DBC *dbc, SV *key, SV *data, U32 flags = 0, SV *callback = &PL_sv_undef)
+   db_c_get (DBC *dbc, SV *key, SV *data, U32 flags = 0, SV *callback = 0)
       flags: CURRENT FIRST GET_BOTH GET_BOTH_RANGE GET_RECNO JOIN_ITEM LAST NEXT NEXT_DUP NEXT_NODUP PREV PREV_DUP PREV_NODUP SET SET_RANGE SET_RECNO READ_UNCOMMITTED MULTIPLE MULTIPLE_KEY RMW
-   db_c_pget (DBC *dbc, SV *key, SV *pkey, SV *data, U32 flags = 0, SV *callback = &PL_sv_undef)
-   db_c_del (DBC *dbc, U32 flags = 0, SV *callback = &PL_sv_undef)
+   db_c_pget (DBC *dbc, SV *key, SV *pkey, SV *data, U32 flags = 0, SV *callback = 0)
+   db_c_del (DBC *dbc, U32 flags = 0, SV *callback = 0)
 
-   db_sequence_open (DB_SEQUENCE *seq, DB_TXN_ornull *txnid, SV *key, U32 flags = 0, SV *callback = &PL_sv_undef)
+   db_sequence_open (DB_SEQUENCE *seq, DB_TXN_ornull *txnid, SV *key, U32 flags = 0, SV *callback = 0)
       flags: CREATE EXCL
-   db_sequence_close (DB_SEQUENCE *seq, U32 flags = 0, SV *callback = &PL_sv_undef)
-   db_sequence_get (DB_SEQUENCE *seq, DB_TXN_ornull *txnid, int delta, SV *seq_value, U32 flags = DB_TXN_NOSYNC, SV *callback = &PL_sv_undef)
+   db_sequence_close (DB_SEQUENCE *seq, U32 flags = 0, SV *callback = 0)
+   db_sequence_get (DB_SEQUENCE *seq, DB_TXN_ornull *txnid, int delta, SV *seq_value, U32 flags = DB_TXN_NOSYNC, SV *callback = 0)
       flags: TXN_NOSYNC
-   db_sequence_remove (DB_SEQUENCE *seq, DB_TXN_ornull *txnid = 0, U32 flags = 0, SV *callback = &PL_sv_undef)
+   db_sequence_remove (DB_SEQUENCE *seq, DB_TXN_ornull *txnid = 0, U32 flags = 0, SV *callback = 0)
       flags: TXN_NOSYNC
 
-=head3 db_txn_finish (DB_TXN *txn, U32 flags = 0, SV *callback = &PL_sv_undef)
+=head3 db_txn_finish (DB_TXN *txn, U32 flags = 0, SV *callback = 0)
 
 This is not actually a Berkeley DB function but a BDB module
 extension. The background for this exytension is: It is very annoying to

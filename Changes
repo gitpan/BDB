@@ -2,6 +2,9 @@ Revision history for perl module BDB.
 
 TODO: DB_RECNUM/DB_SET_RECNO?
 
+1.83 Sun Jan 11 01:52:56 CET 2009
+	- fix db_upgrade, add db_verify.
+
 1.82 Sun Jan  4 11:22:44 CET 2009
         - use our own socketpair emulation (stolen from libev), as perl's
           doesn't work on vista, which returns fantasy port numbers

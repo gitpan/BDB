@@ -152,7 +152,7 @@ enum {
   REQ_ENV_OPEN, REQ_ENV_CLOSE, REQ_ENV_TXN_CHECKPOINT, REQ_ENV_LOCK_DETECT,
   REQ_ENV_MEMP_SYNC, REQ_ENV_MEMP_TRICKLE, REQ_ENV_DBREMOVE, REQ_ENV_DBRENAME,
   REQ_ENV_LOG_ARCHIVE,
-  REQ_DB_OPEN, REQ_DB_CLOSE, REQ_DB_COMPACT, REQ_DB_SYNC, REQ_DB_UPGRADE,
+  REQ_DB_OPEN, REQ_DB_CLOSE, REQ_DB_COMPACT, REQ_DB_SYNC, REQ_DB_VERIFY, REQ_DB_UPGRADE,
   REQ_DB_PUT, REQ_DB_EXISTS, REQ_DB_GET, REQ_DB_PGET, REQ_DB_DEL, REQ_DB_KEY_RANGE,
   REQ_TXN_COMMIT, REQ_TXN_ABORT, REQ_TXN_FINISH,
   REQ_C_CLOSE, REQ_C_COUNT, REQ_C_PUT, REQ_C_GET, REQ_C_PGET, REQ_C_DEL,
@@ -885,6 +885,10 @@ bdb_request (bdb_req req)
         req->result = req->db->sync (req->db, req->uint1);
         break;
 
+      case REQ_DB_VERIFY:
+        req->result = req->db->verify (req->db, req->buf1, req->buf2, 0, req->uint1);
+        break;
+
       case REQ_DB_UPGRADE:
         req->result = req->db->upgrade (req->db, req->buf1, req->uint1);
         break;
@@ -1436,6 +1440,12 @@ BOOT:
           const_iv (SECONDARY_BAD)
           const_iv (VERIFY_BAD)
 
+          const_iv (SALVAGE)
+          const_iv (AGGRESSIVE)
+          const_iv (PRINTABLE)
+          const_iv (NOORDERCHK)
+          const_iv (ORDERCHKONLY)
+
           const_iv (ARCH_ABS)
           const_iv (ARCH_DATA)
           const_iv (ARCH_LOG)
@@ -1890,12 +1900,27 @@ db_sync (DB *db, U32 flags = 0, SV *callback = 0)
 }
 
 void
+db_verify (DB *db, bdb_filename file, bdb_filename database = 0, SV *dummy = 0, U32 flags = 0, SV *callback = 0)
+	PREINIT:
+        CALLBACK
+	CODE:
+{
+        dREQ (REQ_DB_VERIFY, 1);
+        ptr_nuke (ST (0)); /* verify destroys the database handle, hopefully it is freed as well */
+        req->db    = db;
+        req->buf1  = strdup (file);
+        req->buf2  = strdup_ornull (database);
+        req->uint1 = flags;
+        REQ_SEND;
+}
+
+void
 db_upgrade (DB *db, bdb_filename file, U32 flags = 0, SV *callback = 0)
 	PREINIT:
         CALLBACK
 	CODE:
 {
-        dREQ (REQ_DB_SYNC, 1);
+        dREQ (REQ_DB_UPGRADE, 1);
         req->db    = db;
         req->buf1  = strdup (file);
         req->uint1 = flags;
