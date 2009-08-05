@@ -29,7 +29,7 @@ BDB - Asynchronous Berkeley DB access
  # when you also use Coro, management is easy:
  use Coro::BDB;
 
- # automatic event loop intergration with AnyEvent:
+ # automatic event loop integration with AnyEvent:
  use AnyEvent::BDB;
 
  # automatic result processing with EV:
@@ -105,15 +105,14 @@ result in a runtime error).
 
 package BDB;
 
-no warnings;
-use strict 'vars';
+use common::sense;
 
 use base 'Exporter';
 
 our $VERSION;
 
 BEGIN {
-   $VERSION = '1.83';
+   $VERSION = '1.84';
 
    our @BDB_REQ = qw(
       db_env_open db_env_close db_env_txn_checkpoint db_env_lock_detect

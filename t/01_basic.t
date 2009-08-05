@@ -1,5 +1,7 @@
 #! perl
 
+$| = 1;
+
 print "1..10\n";
 
 use BDB;

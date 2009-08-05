@@ -2,6 +2,11 @@ Revision history for perl module BDB.
 
 TODO: DB_RECNUM/DB_SET_RECNO?
 
+1.84 Wed Aug  5 13:52:21 CEST 2009
+        - require common sense.
+        - use schmorp.h for pipe, taking advantage of eventfd.
+	- fix a bug in event pipe creation code on win32.
+
 1.83 Sun Jan 11 01:52:56 CET 2009
 	- fix db_upgrade, add db_verify.
 

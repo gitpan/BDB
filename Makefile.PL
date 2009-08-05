@@ -47,6 +47,9 @@ my $mm = MM->new({
     VERSION_FROM => "BDB.pm",
     INC          => $INC,
     LIBS         => $LIBS,
+    PREREQ_PM    => {
+       common::sense => 0,
+    },
     PM           => {
     		    'BDB.pm'		=> '$(INST_LIBDIR)/BDB.pm',
                     },

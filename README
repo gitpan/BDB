@@ -27,7 +27,7 @@ SYNOPSIS
      # when you also use Coro, management is easy:
      use Coro::BDB;
 
-     # automatic event loop intergration with AnyEvent:
+     # automatic event loop integration with AnyEvent:
      use AnyEvent::BDB;
 
      # automatic result processing with EV:
@@ -392,8 +392,8 @@ BERKELEYDB FUNCTIONS
 
    Example:
        my $seq = $db->sequence;
-          
-   db_sequence_open $seq, undef, "seq", BDB::CREATE;
+      
+       db_sequence_open $seq, undef, "seq", BDB::CREATE;
        db_sequence_get $seq, undef, 1, my $value;
 
 SUPPORT FUNCTIONS

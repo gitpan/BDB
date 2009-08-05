@@ -3,6 +3,7 @@ MANIFEST
 COPYING
 Changes
 Makefile.PL
+schmorp.h
 BDB.pm
 BDB.xs
 xthread.h

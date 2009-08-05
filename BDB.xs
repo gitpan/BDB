@@ -8,7 +8,9 @@
 #include "perl.h"
 #include "XSUB.h"
 
-// perl stupidly defines these as macros, breaking
+#include "schmorp.h"
+
+// perl stupidly defines these as argument-less macros, breaking
 // lots and lots of code.
 #undef open
 #undef close
@@ -247,7 +249,7 @@ static void worker_free (worker *wrk)
 static volatile unsigned int nreqs, nready, npending;
 static volatile unsigned int max_idle = 4;
 static volatile unsigned int max_outstanding = 0xffffffff;
-static int respipe_osf [2], respipe [2] = { -1, -1 };
+static s_epipe respipe;
 
 static mutex_t reslock = X_MUTEX_INIT;
 static mutex_t reqlock = X_MUTEX_INIT;
@@ -458,136 +460,11 @@ static void req_free (bdb_req req)
   Safefree (req);
 }
 
-#ifdef USE_SOCKETS_AS_HANDLES
-# define TO_SOCKET(x) (win32_get_osfhandle (x))
-#else
-# define EV_SELECT_IS_WINSOCKET 1
-# define TO_SOCKET(x) (x)
-#endif
-
-#ifdef _WIN32
-/* taken verbatim from libev's ev_win32.c */
-/* oh, the humanity! */
-static int
-ev_pipe (int filedes [2])
-{
-  struct sockaddr_in addr = { 0 };
-  int addr_size = sizeof (addr);
-  struct sockaddr_in adr2;
-  int adr2_size;
-  SOCKET listener;
-  SOCKET sock [2] = { -1, -1 };
-
-  if ((listener = socket (AF_INET, SOCK_STREAM, 0)) == INVALID_SOCKET) 
-    return -1;
-
-  addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = htonl (INADDR_LOOPBACK);
-  addr.sin_port = 0;
-
-  if (bind (listener, (struct sockaddr *)&addr, addr_size))
-    goto fail;
-
-  if (getsockname (listener, (struct sockaddr *)&addr, &addr_size))
-    goto fail;
-
-  if (listen (listener, 1))
-    goto fail;
-
-  if ((sock [0] = socket (AF_INET, SOCK_STREAM, 0)) == INVALID_SOCKET) 
-    goto fail;
-
-  if (connect (sock [0], (struct sockaddr *)&addr, addr_size))
-    goto fail;
-
-  if ((sock [1] = accept (listener, 0, 0)) < 0)
-    goto fail;
-
-  /* windows vista returns fantasy port numbers for getpeername.
-   * example for two interconnected tcp sockets:
-   *
-   * (Socket::unpack_sockaddr_in getsockname $sock0)[0] == 53364
-   * (Socket::unpack_sockaddr_in getpeername $sock0)[0] == 53363
-   * (Socket::unpack_sockaddr_in getsockname $sock1)[0] == 53363
-   * (Socket::unpack_sockaddr_in getpeername $sock1)[0] == 53365
-   *
-   * wow! tridirectional sockets!
-   *
-   * this way of checking ports seems to work:
-   */
-  if (getpeername (sock [0], (struct sockaddr *)&addr, &addr_size))
-    goto fail;
-
-  if (getsockname (sock [1], (struct sockaddr *)&adr2, &adr2_size))
-    goto fail;
-
-  errno = WSAEINVAL;
-  if (addr_size != adr2_size
-      || addr.sin_addr.s_addr != adr2.sin_addr.s_addr /* just to be sure, I mean, it's windows */
-      || addr.sin_port        != adr2.sin_port)
-    goto fail;
-
-  closesocket (listener);
-
-#if EV_SELECT_IS_WINSOCKET
-  filedes [0] = _open_osfhandle (sock [0], 0);
-  filedes [1] = _open_osfhandle (sock [1], 0);
-#else
-  /* when select isn't winsocket, we also expect socket, connect, accept etc.
-   * to work on fds */
-  filedes [0] = sock [0];
-  filedes [1] = sock [1];
-#endif
-
-  return 0;
-
-fail:
-  closesocket (listener);
-
-  if (sock [0] != INVALID_SOCKET) closesocket (sock [0]);
-  if (sock [1] != INVALID_SOCKET) closesocket (sock [1]);
-
-  return -1;
-}
-
-#define pipe(filedes) ev_pipe(filedes)
-#endif
-
 static void
 create_respipe (void)
 {
-#ifdef _WIN32
-  int arg; /* argg */
-#endif
-  int old_readfd = respipe [0];
-
-  if (respipe [1] >= 0)
-    respipe_close (TO_SOCKET (respipe [1]));
-
-  if (pipe (respipe))
-    croak ("unable to initialize result pipe");
-
-  if (old_readfd >= 0)
-    {
-      if (dup2 (TO_SOCKET (respipe [0]), TO_SOCKET (old_readfd)) < 0)
-        croak ("unable to initialize result pipe(2)");
-     
-      respipe_close (respipe [0]);
-      respipe [0] = old_readfd;
-    }
-
-#ifdef _WIN32
-  arg = 1;
-  if (ioctlsocket (TO_SOCKET (respipe [0]), FIONBIO, &arg)
-      || ioctlsocket (TO_SOCKET (respipe [1]), FIONBIO, &arg))
-#else
-  if (fcntl (respipe [0], F_SETFL, O_NONBLOCK)
-      || fcntl (respipe [1], F_SETFL, O_NONBLOCK))
-#endif
-    croak ("unable to initialize result pipe(3)");
-
-  respipe_osf [0] = TO_SOCKET (respipe [0]);
-  respipe_osf [1] = TO_SOCKET (respipe [1]);
+  if (s_epipe_renew (&respipe))
+    croak ("BDB: unable to create event pipe");
 }
 
 static void bdb_request (bdb_req req);
@@ -733,8 +610,6 @@ static void max_parallel (int nthreads)
 
 static void poll_wait (void)
 {
-  fd_set rfd;
-
   while (nreqs)
     {
       int size;
@@ -747,10 +622,7 @@ static void poll_wait (void)
 
       maybe_start_thread ();
 
-      FD_ZERO (&rfd);
-      FD_SET (respipe [0], &rfd);
-
-      PerlSock_select (respipe [0] + 1, &rfd, 0, 0, 0);
+      s_epipe_wait (&respipe);
     }
 }
 
@@ -780,12 +652,8 @@ static int poll_cb (void)
               --npending;
 
               if (!res_queue.size)
-                {
-                  /* read any signals sent by the worker threads */
-                  char buf [4];
-                  while (respipe_read (respipe [0], buf, 4) == 4)
-                    ;
-                }
+                /* read any signals sent by the worker threads */
+                s_epipe_drain (&respipe);
             }
 
           X_UNLOCK (reslock);
@@ -1011,7 +879,7 @@ X_THREAD_PROC (bdb_proc)
 
   for (;;)
     {
-      ts.tv_sec  = time (0) + IDLE_TIMEOUT;
+      ts.tv_sec = time (0) + IDLE_TIMEOUT;
 
       X_LOCK (reqlock);
 
@@ -1066,8 +934,7 @@ X_THREAD_PROC (bdb_proc)
       ++npending;
 
       if (!reqq_push (&res_queue, req))
-        /* write a dummy byte to the pipe so fh becomes ready */
-        respipe_write (respipe_osf [1], (const void *)&respipe_osf, 1);
+        s_epipe_signal (&respipe);
 
       self->req = 0;
       worker_clear (self);
@@ -1612,7 +1479,7 @@ int
 poll_fileno ()
 	PROTOTYPE:
 	CODE:
-        RETVAL = respipe [0];
+        RETVAL = s_epipe_fd (&respipe);
 	OUTPUT:
 	RETVAL
 
