@@ -41,66 +41,67 @@ DB_SEQ
 	$var = sizeof (IV) > 4 ? SvIV ($arg) : SvNV ($arg);
 
 DB_ENV
-        SvPTR ($var, $arg, DB_ENV *, BDB::Env, 0);
+        SvPTR ($var, $arg, DB_ENV *, bdb_env_stash, BDB::Env, 0);
 
 DB_TXN
-        SvPTR ($var, $arg, DB_TXN *, BDB::Txn, 0);
+        SvPTR ($var, $arg, DB_TXN *, bdb_txn_stash, BDB::Txn, 0);
 
 DBC
-        SvPTR ($var, $arg, DBC *, BDB::Cursor, 0);
+        SvPTR ($var, $arg, DBC *, bdb_cursor_stash, BDB::Cursor, 0);
 
 DB
-        SvPTR ($var, $arg, DB *, BDB::Db, 0);
+        SvPTR ($var, $arg, DB *, bdb_db_stash, BDB::Db, 0);
 
 DB_SEQUENCE
-        SvPTR ($var, $arg, DB_SEQUENCE *, BDB::Sequence, 0);
+        SvPTR ($var, $arg, DB_SEQUENCE *, bdb_sequence_stash, BDB::Sequence, 0);
 
 
 DB_ENV_ornull
-        SvPTR ($var, $arg, DB_ENV *, BDB::Env, 1);
+        SvPTR ($var, $arg, DB_ENV *, bdb_env_stash, BDB::Env, 1);
 
 DB_TXN_ornull
-        SvPTR ($var, $arg, DB_TXN *, BDB::Txn, 1);
+        SvPTR ($var, $arg, DB_TXN *, bdb_txn_stash, BDB::Txn, 1);
 
 DBC_ornull
-        SvPTR ($var, $arg, DBC *, BDB::Cursor, 1);
+        SvPTR ($var, $arg, DBC *, bdb_cursor_stash, BDB::Cursor, 1);
 
 DB_ornull
-        SvPTR ($var, $arg, DB *, BDB::Db, 1);
+        SvPTR ($var, $arg, DB *, bdb_db_stash, BDB::Db, 1);
 
 DB_SEQUENCE_ornull
-        SvPTR ($var, $arg, DB_SEQUENCE *, BDB::Sequence, 1);
+        SvPTR ($var, $arg, DB_SEQUENCE *, bdb_sequence_stash, BDB::Sequence, 1);
 
 
 DB_ENV_ornuked
-        SvPTR ($var, $arg, DB_ENV *, BDB::Env, 2);
+        SvPTR ($var, $arg, DB_ENV *, bdb_env_stash, BDB::Env, 2);
 
 DB_TXN_ornuked
-        SvPTR ($var, $arg, DB_TXN *, BDB::Txn, 2);
+        SvPTR ($var, $arg, DB_TXN *, bdb_txn_stash, BDB::Txn, 2);
 
 DBC_ornuked
-        SvPTR ($var, $arg, DBC *, BDB::Cursor, 2);
+        SvPTR ($var, $arg, DBC *, bdb_cursor_stash, BDB::Cursor, 2);
 
 DB_ornuked
-        SvPTR ($var, $arg, DB *, BDB::Db, 2);
+        SvPTR ($var, $arg, DB *, bdb_db_stash, BDB::Db, 2);
 
 DB_SEQUENCE_ornuked
-        SvPTR ($var, $arg, DB_SEQUENCE *, BDB::Sequence, 2);
+        SvPTR ($var, $arg, DB_SEQUENCE *, bdb_sequence_stash, BDB::Sequence, 2);
 
 
 OUTPUT
 
 DB_ENV
-	sv_setref_pv ($arg, "BDB::Env", (void *)$var);
+	$arg = newSVptr ($var, bdb_env_stash);
 
 DB_TXN
-	sv_setref_pv ($arg, "BDB::Txn", (void *)$var);
+	$arg = newSVptr ($var, bdb_txn_stash);
 
 DBC
-	sv_setref_pv ($arg, "BDB::Cursor", (void *)$var);
+	$arg = newSVptr ($var, bdb_cursor_stash);
 
 DB
-	sv_setref_pv ($arg, "BDB::Db", (void *)$var);
+	$arg = newSVptr ($var, bdb_db_stash);
 
 DB_SEQUENCE
-	sv_setref_pv ($arg, "BDB::Sequence", (void *)$var);
+	$arg = newSVptr ($var, bdb_sequence_stash);
+

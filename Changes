@@ -2,6 +2,10 @@ Revision history for perl module BDB.
 
 TODO: DB_RECNUM/DB_SET_RECNO?
 
+1.85 Thu Nov 12 03:22:21 CET 2009
+	- speed up object creation/type checking considerably
+          by caching the stashes.
+
 1.84 Wed Aug  5 13:52:21 CEST 2009
         - require common sense.
         - use schmorp.h for pipe, taking advantage of eventfd.

@@ -61,6 +61,14 @@ typedef char *bdb_filename;
 
 static SV *prepare_cb;
 
+static HV
+  *bdb_stash,
+  *bdb_env_stash,
+  *bdb_txn_stash,
+  *bdb_cursor_stash,
+  *bdb_db_stash,
+  *bdb_sequence_stash;
+
 #if DB_VERSION_MINOR >= 6
 # define c_close close 
 # define c_count count 
@@ -1020,7 +1028,7 @@ static void atfork_child (void)
 #define REQ_SEND						\
   req_send (req)
 
-#define SvPTR(var, arg, type, class, nullok)                   			\
+#define SvPTR(var, arg, type, stash, class, nullok)            			\
   if (!SvOK (arg))								\
     {										\
       if (nullok != 1)								\
@@ -1028,7 +1036,7 @@ static void atfork_child (void)
 										\
       (var) = 0;								\
     }										\
-  else if (sv_derived_from ((arg), # class))                    		\
+  else if (SvSTASH (SvRV (arg)) == stash || sv_derived_from ((arg), # class))   \
     {                                                           		\
       IV tmp = SvIV ((SV*) SvRV (arg));                         		\
       (var) = INT2PTR (type, tmp);                              		\
@@ -1041,6 +1049,16 @@ static void atfork_child (void)
 #define ARG_MUTABLE(name)							\
   if (SvREADONLY (name))							\
     croak ("argument " #name " is read-only/constant, but the request requires it to be mutable");
+
+static SV *
+newSVptr (void *ptr, HV *stash)
+{
+  SV *rv = NEWSV (0, 0);
+  sv_upgrade (rv, SVt_PVMG);
+  sv_setiv (rv, PTR2IV (ptr));
+
+  return sv_bless (newRV_noinc (rv), stash);
+}
 
 static void
 ptr_nuke (SV *sv)
@@ -1172,7 +1190,12 @@ PROTOTYPES: ENABLE
 
 BOOT:
 {
-	HV *stash = gv_stashpv ("BDB", 1);
+	bdb_stash          = gv_stashpv ("BDB"          , 1);
+        bdb_env_stash      = gv_stashpv ("BDB::Env"     , 1);
+        bdb_txn_stash      = gv_stashpv ("BDB::Txn"     , 1);
+        bdb_cursor_stash   = gv_stashpv ("BDB::Cursor"  , 1);
+        bdb_db_stash       = gv_stashpv ("BDB::Db"      , 1);
+        bdb_sequence_stash = gv_stashpv ("BDB::Sequence", 1);
 
         static const struct {
           const char *name;
@@ -1380,7 +1403,7 @@ BOOT:
         };
 
         for (civ = const_iv + sizeof (const_iv) / sizeof (const_iv [0]); civ-- > const_iv; )
-          newCONSTSUB (stash, (char *)civ->name, newSViv (civ->iv));
+          newCONSTSUB (bdb_stash, (char *)civ->name, newSViv (civ->iv));
 
         prepare_cb = &PL_sv_undef;
 
@@ -1388,10 +1411,10 @@ BOOT:
           /* we currently only allow version, minor-version and patchlevel to go up to 255 */
           char vstring[3] = { DB_VERSION_MAJOR, DB_VERSION_MINOR, DB_VERSION_PATCH };
 
-          newCONSTSUB (stash, "VERSION_v", newSVpvn (vstring, 3));
+          newCONSTSUB (bdb_stash, "VERSION_v", newSVpvn (vstring, 3));
         }
 
-        newCONSTSUB (stash, "VERSION_STRING", newSVpv (DB_VERSION_STRING, 0));
+        newCONSTSUB (bdb_stash, "VERSION_STRING", newSVpv (DB_VERSION_STRING, 0));
 
         create_respipe ();
 
