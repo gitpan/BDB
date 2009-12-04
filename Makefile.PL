@@ -1,5 +1,6 @@
 use ExtUtils::MakeMaker;
 
+use 5.008008;
 use Config;
 
 if ($^O =~ /win32/i or $^O =~ /mswin/) {

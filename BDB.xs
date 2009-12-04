@@ -1190,13 +1190,6 @@ PROTOTYPES: ENABLE
 
 BOOT:
 {
-	bdb_stash          = gv_stashpv ("BDB"          , 1);
-        bdb_env_stash      = gv_stashpv ("BDB::Env"     , 1);
-        bdb_txn_stash      = gv_stashpv ("BDB::Txn"     , 1);
-        bdb_cursor_stash   = gv_stashpv ("BDB::Cursor"  , 1);
-        bdb_db_stash       = gv_stashpv ("BDB::Db"      , 1);
-        bdb_sequence_stash = gv_stashpv ("BDB::Sequence", 1);
-
         static const struct {
           const char *name;
           IV iv;
@@ -1401,6 +1394,13 @@ BOOT:
 # endif
 #endif
         };
+
+	bdb_stash          = gv_stashpv ("BDB"          , 1);
+        bdb_env_stash      = gv_stashpv ("BDB::Env"     , 1);
+        bdb_txn_stash      = gv_stashpv ("BDB::Txn"     , 1);
+        bdb_cursor_stash   = gv_stashpv ("BDB::Cursor"  , 1);
+        bdb_db_stash       = gv_stashpv ("BDB::Db"      , 1);
+        bdb_sequence_stash = gv_stashpv ("BDB::Sequence", 1);
 
         for (civ = const_iv + sizeof (const_iv) / sizeof (const_iv [0]); civ-- > const_iv; )
           newCONSTSUB (bdb_stash, (char *)civ->name, newSViv (civ->iv));

@@ -2,6 +2,9 @@ Revision history for perl module BDB.
 
 TODO: DB_RECNUM/DB_SET_RECNO?
 
+1.86 Fri Dec  4 16:03:21 CET 2009
+	- port to broken loser platform.
+
 1.85 Thu Nov 12 03:22:21 CET 2009
 	- speed up object creation/type checking considerably
           by caching the stashes.
