@@ -2,6 +2,12 @@ Revision history for perl module BDB.
 
 TODO: DB_RECNUM/DB_SET_RECNO?
 
+1.87 Tue Dec 22 03:06:09 CET 2009
+	- db 4.8 has removed XA resource manager functionality,
+          cope with it.
+        - add LOGVERSION, LOGVERSION_LATCHING, LOGOLDVER
+          symbols.
+
 1.86 Fri Dec  4 16:03:21 CET 2009
 	- port to broken loser platform.
 

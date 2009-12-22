@@ -1228,7 +1228,9 @@ BOOT:
           const_iv (WRITECURSOR)
           const_iv (YIELDCPU)
           const_iv (ENCRYPT_AES)
+#if DB_VERSION_MINOR < 8
           const_iv (XA_CREATE)
+#endif
           const_iv (BTREE)
           const_iv (HASH)
           const_iv (QUEUE)
@@ -1302,8 +1304,8 @@ BOOT:
           const_iv (LOCK_YOUNGEST)
 
           const_iv (DONOTINDEX)
-          const_iv (KEYEMPTY	)
-          const_iv (KEYEXIST	)
+          const_iv (KEYEMPTY)
+          const_iv (KEYEXIST)
           const_iv (LOCK_DEADLOCK)
           const_iv (LOCK_NOTGRANTED)
           const_iv (NOSERVER)
@@ -1342,6 +1344,8 @@ BOOT:
           const_iv (VERSION_MAJOR)
           const_iv (VERSION_MINOR)
           const_iv (VERSION_PATCH)
+          const_iv (LOGVERSION)
+          const_iv (LOGOLDVER)
 #if DB_VERSION_MINOR >= 3
           const_iv (INORDER)
           const_iv (LOCK_MAXWRITE)
@@ -1392,6 +1396,9 @@ BOOT:
           const_iv (DSYNC_LOG)
           const_iv (LOG_INMEMORY)
 # endif
+#if DB_VERSION_MINOR >= 8
+          const_iv (LOGVERSION_LATCHING)
+#endif
 #endif
         };
 
