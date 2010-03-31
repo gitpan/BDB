@@ -2,6 +2,13 @@ Revision history for perl module BDB.
 
 TODO: DB_RECNUM/DB_SET_RECNO?
 
+1.88 Wed Mar 31 02:43:42 CEST 2010
+        - a double fork partially killed the event pipe (great testcase
+          by dormando). affects IO::AIO, BDB and Async::Interrupt.
+        - suck steve's dick and rename our symbols to avoid colliding
+          with nonstandard identifier spam on the broken os x pseudo-os.
+          affects IO::AIO and BDB.
+
 1.87 Tue Dec 22 03:06:09 CET 2009
 	- db 4.8 has removed XA resource manager functionality,
           cope with it.

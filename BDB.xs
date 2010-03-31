@@ -226,13 +226,13 @@ static int next_pri = DEFAULT_PRI + PRI_BIAS;
 static unsigned int started, idle, wanted;
 
 /* worker threads management */
-static mutex_t wrklock = X_MUTEX_INIT;
+static xmutex_t wrklock = X_MUTEX_INIT;
 
 typedef struct worker {
   /* locked by wrklock */
   struct worker *prev, *next;
 
-  thread_t tid;
+  xthread_t tid;
 
   /* locked by reslock, reqlock or wrklock */
   bdb_req req; /* currently processed request */
@@ -259,9 +259,9 @@ static volatile unsigned int max_idle = 4;
 static volatile unsigned int max_outstanding = 0xffffffff;
 static s_epipe respipe;
 
-static mutex_t reslock = X_MUTEX_INIT;
-static mutex_t reqlock = X_MUTEX_INIT;
-static cond_t  reqwait = X_COND_INIT;
+static xmutex_t reslock = X_MUTEX_INIT;
+static xmutex_t reqlock = X_MUTEX_INIT;
+static xcond_t  reqwait = X_COND_INIT;
 
 #if WORDACCESS_UNSAFE
 
