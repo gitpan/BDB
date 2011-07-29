@@ -33,8 +33,10 @@
 
 #include <db.h>
 
-#if DB_VERSION_MAJOR != 4 || (DB_VERSION_MAJOR == 4 && DB_VERSION_MINOR < 3)
-# error you need Berkeley DB 4.3 or a newer 4.x version installed
+#define DBVER DB_VERSION_MAJOR * 100 + DB_VERSION_MINOR
+
+#if DBVER < 403
+# error you need Berkeley DB 4.3 or a newer version installed
 #endif
 
 /* number of seconds after which idle threads exit */
@@ -52,7 +54,7 @@ typedef DB_TXN      DB_TXN_ornuked;
 typedef DBC         DBC_ornuked;
 typedef DB          DB_ornuked;
 
-#if DB_VERSION_MINOR >= 3
+#if DBVER >= 403
 typedef DB_SEQUENCE DB_SEQUENCE_ornull;
 typedef DB_SEQUENCE DB_SEQUENCE_ornuked;
 #endif
@@ -69,7 +71,7 @@ static HV
   *bdb_db_stash,
   *bdb_sequence_stash;
 
-#if DB_VERSION_MINOR >= 6
+#if DBVER >= 406
 # define c_close close 
 # define c_count count 
 # define c_del   del   
@@ -188,7 +190,7 @@ typedef struct bdb_cb
 
   DBT dbt1, dbt2, dbt3;
   DB_KEY_RANGE key_range;
-#if DB_VERSION_MINOR >= 3
+#if DBVER >= 403
   DB_SEQUENCE *seq;
   db_seq_t seq_t;
 #endif
@@ -399,7 +401,7 @@ static int req_invoke (bdb_req req)
         }
         break;
 
-#if DB_VERSION_MINOR >= 3
+#if DBVER >= 403
       case REQ_SEQ_GET:
         SvREADONLY_off (req->sv1);
 
@@ -751,7 +753,7 @@ bdb_request (bdb_req req)
         req->result = req->db->close (req->db, req->uint1);
         break;
 
-#if DB_VERSION_MINOR >= 4
+#if DBVER >= 404
       case REQ_DB_COMPACT:
         req->result = req->db->compact (req->db, req->txn, req->dbt1.data ? &req->dbt1 : 0, req->dbt2.data ? &req->dbt2 : 0, 0, req->uint1, 0);
         break;
@@ -773,7 +775,7 @@ bdb_request (bdb_req req)
         req->result = req->db->put (req->db, req->txn, &req->dbt1, &req->dbt2, req->uint1);
         break;
 
-#if DB_VERSION_MINOR >= 6
+#if DBVER >= 406
       case REQ_DB_EXISTS:
         req->result = req->db->exists (req->db, req->txn, &req->dbt1, req->uint1);
         break;
@@ -841,7 +843,7 @@ bdb_request (bdb_req req)
         req->result = req->dbc->c_del (req->dbc, req->uint1);
         break;
 
-#if DB_VERSION_MINOR >= 3
+#if DBVER >= 403
       case REQ_SEQ_OPEN:
         req->result = req->seq->open (req->seq, req->txn, &req->dbt1, req->uint1);
         break;
@@ -1195,7 +1197,9 @@ BOOT:
           IV iv;
         } *civ, const_iv[] = {
 #define const_iv(name) { # name, (IV)DB_ ## name },
+#if DBVER <= 408
           const_iv (RPCCLIENT)
+#endif
           const_iv (INIT_CDB)
           const_iv (INIT_LOCK)
           const_iv (INIT_LOG)
@@ -1228,7 +1232,7 @@ BOOT:
           const_iv (WRITECURSOR)
           const_iv (YIELDCPU)
           const_iv (ENCRYPT_AES)
-#if DB_VERSION_MINOR < 8
+#if DBVER < 408
           const_iv (XA_CREATE)
 #endif
           const_iv (BTREE)
@@ -1346,7 +1350,7 @@ BOOT:
           const_iv (VERSION_PATCH)
           const_iv (LOGVERSION)
           const_iv (LOGOLDVER)
-#if DB_VERSION_MINOR >= 3
+#if DBVER >= 403
           const_iv (INORDER)
           const_iv (LOCK_MAXWRITE)
           const_iv (SEQ_DEC)
@@ -1356,7 +1360,7 @@ BOOT:
           const_iv (LOG_BUFFER_FULL)
           const_iv (VERSION_MISMATCH)
 #endif
-#if DB_VERSION_MINOR >= 4
+#if DBVER >= 404
           const_iv (REGISTER)
           const_iv (DSYNC_DB)
           const_iv (READ_COMMITTED)
@@ -1368,11 +1372,11 @@ BOOT:
           const_iv (FREELIST_ONLY)
           const_iv (VERB_REGISTER)
 #endif
-#if DB_VERSION_MINOR >= 5
+#if DBVER >= 405
           const_iv (MULTIVERSION)
           const_iv (TXN_SNAPSHOT)
 #endif
-#if DB_VERSION_MINOR >= 6
+#if DBVER >= 406
           const_iv (PREV_DUP)
           const_iv (PRIORITY_UNCHANGED)
           const_iv (PRIORITY_VERY_LOW)
@@ -1382,7 +1386,7 @@ BOOT:
           const_iv (PRIORITY_VERY_HIGH)
           const_iv (IGNORE_LEASE)
 #endif
-#if DB_VERSION_MINOR >= 7
+#if DBVER >= 407
           //const_iv (MULTIPLE_KEY)
           const_iv (LOG_DIRECT)
           const_iv (LOG_DSYNC)
@@ -1392,11 +1396,11 @@ BOOT:
 #else
           const_iv (DIRECT_LOG)
           const_iv (LOG_AUTOREMOVE)
-# if DB_VERSION_MINOR >= 3
+# if DBVER >= 403
           const_iv (DSYNC_LOG)
           const_iv (LOG_INMEMORY)
 # endif
-#if DB_VERSION_MINOR >= 8
+#if DBVER >= 408
           const_iv (LOGVERSION_LATCHING)
 #endif
 #endif
@@ -1409,8 +1413,8 @@ BOOT:
         bdb_db_stash       = gv_stashpv ("BDB::Db"      , 1);
         bdb_sequence_stash = gv_stashpv ("BDB::Sequence", 1);
 
-        for (civ = const_iv + sizeof (const_iv) / sizeof (const_iv [0]); civ-- > const_iv; )
-          newCONSTSUB (bdb_stash, (char *)civ->name, newSViv (civ->iv));
+        for (civ = const_iv + sizeof (const_iv) / sizeof (const_iv [0]); civ > const_iv; civ--)
+          newCONSTSUB (bdb_stash, (char *)civ[-1].name, newSViv (civ[-1].iv));
 
         prepare_cb = &PL_sv_undef;
 
@@ -1765,7 +1769,7 @@ db_close (DB *db, U32 flags = 0, SV *callback = 0)
         REQ_SEND;
 }
 
-#if DB_VERSION_MINOR >= 4
+#if DBVER >= 404
 
 void
 db_compact (DB *db, DB_TXN_ornull *txn = 0, SV *start = 0, SV *stop = 0, SV *unused1 = 0, U32 flags = DB_FREE_SPACE, SV *unused2 = 0, SV *callback = 0)
@@ -1854,7 +1858,7 @@ db_put (DB *db, DB_TXN_ornull *txn, SV *key, SV *data, U32 flags = 0, SV *callba
         REQ_SEND;
 }
 
-#if DB_VERSION_MINOR >= 6
+#if DBVER >= 406
 
 void
 db_exists (DB *db, DB_TXN_ornull *txn, SV *key, U32 flags = 0, SV *callback = 0)
@@ -2097,7 +2101,7 @@ db_c_del (DBC *dbc, U32 flags = 0, SV *callback = 0)
 }
 
 
-#if DB_VERSION_MINOR >= 3
+#if DBVER >= 403
 
 void
 db_sequence_open (DB_SEQUENCE *seq, DB_TXN_ornull *txnid, SV *key, U32 flags = 0, SV *callback = 0)
@@ -2201,7 +2205,7 @@ int set_flags (DB_ENV *env, U32 flags, int onoff = 1)
 	OUTPUT:
         RETVAL
 
-#if DB_VERSION_MINOR >= 7
+#if DBVER >= 407
 
 int set_intermediate_dir_mode (DB_ENV *env, const char *mode)
 	CODE:
@@ -2298,7 +2302,7 @@ int set_lg_max (DB_ENV *env, U32 max)
 	OUTPUT:
         RETVAL
 
-#if DB_VERSION_MINOR >= 4
+#if DBVER >= 404
 
 int mutex_set_max (DB_ENV *env, U32 max)
         CODE:
@@ -2335,7 +2339,7 @@ txn_begin (DB_ENV *env, DB_TXN_ornull *parent = 0, U32 flags = 0)
         OUTPUT:
         RETVAL
 
-#if DB_VERSION_MINOR >= 5
+#if DBVER >= 405
 
 DB_TXN *
 cdsgroup_begin (DB_ENV *env)
@@ -2447,7 +2451,7 @@ cursor (DB *db, DB_TXN_ornull *txn = 0, U32 flags = 0)
         OUTPUT:
         RETVAL
 
-#if DB_VERSION_MINOR >= 3
+#if DBVER >= 403
 
 DB_SEQUENCE *
 sequence (DB *db, U32 flags = 0)
@@ -2492,7 +2496,7 @@ DESTROY (DBC_ornuked *dbc)
         if (dbc)
           dbc->c_close (dbc);
 
-#if DB_VERSION_MINOR >= 6
+#if DBVER >= 406
 
 int set_priority (DBC *dbc, int priority)
         CODE:
@@ -2500,7 +2504,7 @@ int set_priority (DBC *dbc, int priority)
 
 #endif
 
-#if DB_VERSION_MINOR >= 3
+#if DBVER >= 403
 
 MODULE = BDB		PACKAGE = BDB::Sequence
 

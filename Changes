@@ -2,6 +2,10 @@ Revision history for perl module BDB.
 
 TODO: DB_RECNUM/DB_SET_RECNO?
 
+1.89 Fri Jul 29 11:29:21 CEST 2011
+	- make it compile and test successfully with libdb 5.1, but
+          do not add any new symbols or functionality.
+
 1.88 Wed Mar 31 02:43:42 CEST 2010
         - a double fork partially killed the event pipe (great testcase
           by dormando). affects IO::AIO, BDB and Async::Interrupt.
