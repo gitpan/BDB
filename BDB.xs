@@ -1313,8 +1313,10 @@ BOOT:
           const_iv (LOCK_DEADLOCK)
           const_iv (LOCK_NOTGRANTED)
           const_iv (NOSERVER)
+#if DBVER < 502
           const_iv (NOSERVER_HOME)
           const_iv (NOSERVER_ID)
+#endif
           const_iv (NOTFOUND)
           const_iv (PAGE_NOTFOUND)
           const_iv (REP_DUPMASTER)

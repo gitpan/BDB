@@ -112,7 +112,7 @@ use base 'Exporter';
 our $VERSION;
 
 BEGIN {
-   $VERSION = '1.89';
+   $VERSION = '1.9';
 
    our @BDB_REQ = qw(
       db_env_open db_env_close db_env_txn_checkpoint db_env_lock_detect

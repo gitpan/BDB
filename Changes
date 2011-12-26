@@ -1,6 +1,11 @@
 Revision history for perl module BDB.
 
 TODO: DB_RECNUM/DB_SET_RECNO?
+TODO: find changes for 5.2 - but documentation has been removed from oracles website
+TODO: libdb5.3
+
+1.9  Mon Dec 26 02:46:09 CET 2011
+	- partial: update for libdb 5.2 (to make it compile only).
 
 1.89 Fri Jul 29 11:29:21 CEST 2011
 	- make it compile and test successfully with libdb 5.1, but
