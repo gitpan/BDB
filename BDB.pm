@@ -112,7 +112,7 @@ use base 'Exporter';
 our $VERSION;
 
 BEGIN {
-   $VERSION = '1.9';
+   $VERSION = '1.91';
 
    our @BDB_REQ = qw(
       db_env_open db_env_close db_env_txn_checkpoint db_env_lock_detect
@@ -773,12 +773,12 @@ END { flush }
 
 Remember that, by default, BDB will execute requests in parallel, in
 somewhat random order. That means that it is easy to run a C<db_get>
-request on thesa me database as a concurrent C<db_close> request, leading
+request on the same database as a concurrent C<db_close> request, leading
 to a crash, silent data corruption, eventually the next world war on
 terrorism.
 
 If you only ever use foreground requests (without a callback), this will
-not be an issue.
+not be an issue (unless you use threads).
 
 =head2 Unexpected Freezes or Deadlocks
 

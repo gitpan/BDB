@@ -17,8 +17,8 @@
 
 #ifdef _WIN32
 
-#define NTDDI_VERSION NTDDI_WIN2K // needed to get win2000 api calls
-#define _WIN32_WINNT 0x400
+//#define NTDDI_VERSION NTDDI_WIN2K // needed to get win2000 api calls, fails with mingw
+#define _WIN32_WINNT 0x400 // maybe working alternative for mingw
 #include <stdio.h>//D
 #include <fcntl.h>
 #include <io.h>
@@ -26,6 +26,12 @@
 #include <winsock2.h>
 #include <process.h>
 #include <windows.h>
+
+/* work around some bugs in ptw32 */
+#if defined(__MINGW32__) && defined(_TIMESPEC_DEFINED)
+#define HAVE_STRUCT_TIMESPEC 1
+#endif
+
 #include <pthread.h>
 #define sigset_t int
 #define sigfillset(a)
@@ -47,11 +53,11 @@ typedef pthread_cond_t xcond_t;
 #define X_COND_TIMEDWAIT(cond,mutex,to) pthread_cond_timedwait (&(cond), &(mutex), &(to))
 
 typedef pthread_t xthread_t;
-#define X_THREAD_PROC(name) void *name (void *thr_arg)
+#define X_THREAD_PROC(name) static void *name (void *thr_arg)
 #define X_THREAD_ATFORK(a,b,c)
 
 static int
-thread_create (xthread_t *tid, void *(*proc)(void *), void *arg)
+xthread_create (xthread_t *tid, void *(*proc)(void *), void *arg)
 {
   int retval;
   pthread_attr_t attr;
@@ -132,7 +138,7 @@ typedef pthread_t xthread_t;
 #endif
 
 static int
-thread_create (xthread_t *tid, void *(*proc)(void *), void *arg)
+xthread_create (xthread_t *tid, void *(*proc)(void *), void *arg)
 {
   int retval;
   sigset_t fullsigset, oldsigset;

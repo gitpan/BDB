@@ -488,7 +488,7 @@ static void start_thread (void)
     croak ("unable to allocate worker thread data");
 
   X_LOCK (wrklock);
-  if (thread_create (&wrk->tid, bdb_proc, (void *)wrk))
+  if (xthread_create (&wrk->tid, bdb_proc, (void *)wrk))
     {
       wrk->prev = &wrk_first;
       wrk->next = wrk_first.next;

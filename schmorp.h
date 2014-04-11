@@ -3,6 +3,7 @@
 
 /* WARNING
  * This header file is a shared resource between many modules.
+ * perl header files MUST already be included.
  */
 
 #include <signal.h>
@@ -50,6 +51,32 @@
 #  define IS_PADCONST(v) 0
 # endif
 #endif
+
+/* use NV for 32 bit perls as it allows larger offsets */
+#if IVSIZE >= 8
+typedef IV VAL64;
+# define SvVAL64(sv) SvIV (sv)
+# define newSVval64(i64) newSViv (i64)
+#else
+typedef NV VAL64;
+# define SvVAL64(sv) SvNV (sv)
+# define newSVval64(i64) newSVnv (i64)
+#endif
+
+/* typemap for the above */
+/*
+VAL64		T_VAL64
+
+INPUT
+
+T_VAL64
+	$var = ($type)SvVAL64 ($arg);
+
+OUTPUT
+
+T_VAL64
+	$arg = newSVval64 ($var);
+*/
 
 /* 5.11 */
 #ifndef CxHASARGS
@@ -163,7 +190,7 @@ s_get_cv (SV *cb_sv)
   dTHX;
   HV *st;
   GV *gvp;
-
+  
   return (SV *)sv_2cv (cb_sv, &st, &gvp, 0);
 }
 
@@ -207,7 +234,7 @@ s_gensub (pTHX_ void (*xsub)(pTHX_ CV *), void *arg)
 /*****************************************************************************/
 /* portable pipe/socketpair */
 
-#ifdef USE_SOCKETS_AS_HANDLES
+#if defined(USE_SOCKETS_AS_HANDLES) || PERL_VERSION_ATLEAST(5,18,0)
 # define S_TO_HANDLE(x) ((HANDLE)win32_get_osfhandle (x))
 #else
 # define S_TO_HANDLE(x) ((HANDLE)x)
@@ -228,7 +255,7 @@ s_pipe (int filedes [2])
   SOCKET listener;
   SOCKET sock [2] = { -1, -1 };
 
-  if ((listener = socket (AF_INET, SOCK_STREAM, 0)) == INVALID_SOCKET) 
+  if ((listener = socket (AF_INET, SOCK_STREAM, 0)) == INVALID_SOCKET)
     return -1;
 
   addr.sin_family = AF_INET;
@@ -244,7 +271,7 @@ s_pipe (int filedes [2])
   if (listen (listener, 1))
     goto fail;
 
-  if ((sock [0] = socket (AF_INET, SOCK_STREAM, 0)) == INVALID_SOCKET) 
+  if ((sock [0] = socket (AF_INET, SOCK_STREAM, 0)) == INVALID_SOCKET)
     goto fail;
 
   if (connect (sock [0], (struct sockaddr *)&addr, addr_size))

@@ -646,12 +646,12 @@ COMMON PITFALLS
   Unexpected Crashes
     Remember that, by default, BDB will execute requests in parallel, in
     somewhat random order. That means that it is easy to run a "db_get"
-    request on thesa me database as a concurrent "db_close" request, leading
+    request on the same database as a concurrent "db_close" request, leading
     to a crash, silent data corruption, eventually the next world war on
     terrorism.
 
     If you only ever use foreground requests (without a callback), this will
-    not be an issue.
+    not be an issue (unless you use threads).
 
   Unexpected Freezes or Deadlocks
     Remember that, by default, BDB will execute requests in parallel, which

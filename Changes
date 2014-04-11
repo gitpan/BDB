@@ -1,8 +1,16 @@
 Revision history for perl module BDB.
 
 TODO: DB_RECNUM/DB_SET_RECNO?
-TODO: find changes for 5.2 - but documentation has been removed from oracles website
-TODO: libdb5.3
+TODO: 4.8 set_partition
+
+1.91 Fri Apr 11 06:22:38 CEST 2014
+	- perl5porters broke Async::Interrupt, BDB, EV, IO::AIO, OpenCL
+          without warning by switching the meaning of USE_SOCKETS_AS_HANDLES
+          in 5.18. What's so attractive about giving a shit about backwards
+          compatibility - I will never understand.
+	- make sure DBD.pm is installed to the correct directory.
+        - support up to bdb 6.0.
+        - (xthread) work around compile time bugs in ptw32.
 
 1.9  Mon Dec 26 02:46:09 CET 2011
 	- partial: update for libdb 5.2 (to make it compile only).

@@ -52,7 +52,7 @@ my $mm = MM->new({
        common::sense => 0,
     },
     PM           => {
-    		    'BDB.pm'		=> '$(INST_LIBDIR)/BDB.pm',
+    		    'BDB.pm'		=> '$(INST_LIB)/BDB.pm',
                     },
 });
 
